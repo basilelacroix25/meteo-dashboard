@@ -58,6 +58,7 @@ footer{margin-top:3rem;color:var(--text-muted);font-size:12px;}
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 <script>
 const COLORS={'Séjour':'#E8A33D',Chambre:'#D97A6C',Cuisine:'#4FB6B0',Extérieur:'#8C86D6','Anémomètre':'#5C8AA6'};
 const METRIC_LABEL={Temperature:'°C',Humidity:'%',CO2:'ppm',Noise:'dB',Pressure:'hPa',WindStrength:'km/h'};
@@ -107,7 +108,7 @@ async function loadHistory(){
     const parsed=Papa.parse(text,{header:true,dynamicTyping:true,skipEmptyLines:true});
     buildDashboard(parsed.data);
   }catch(e){
-    document.getElementById('mainContent').innerHTML='<div class="empty">Pas encore d\'historique à afficher. Dès que le premier relevé sera collecté (toutes les 15 minutes une fois le workflow GitHub Actions activé), les graphes apparaîtront ici.</div>';
+    document.getElementById('mainContent').innerHTML='<div class="empty">Pas encore d\'historique à afficher, ou une erreur est survenue.<br><span style="font-size:11px;">'+e.message+'</span></div>';
   }
 }
 
