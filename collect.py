@@ -72,9 +72,9 @@ def extract_rows(module_id, module_name, dashboard_data, ts_fallback):
 def collect_station(token, all_rows, latest):
     body = fetch(STATION_URL, token)
     for device in body.get("devices", []):
-        base_name = device.get("station_name", "Station")
+        base_name = device.get("module_name") or "Séjour"
         # Le module de base (indoor #1) mesure temp/hum/CO2/bruit/pression
-        rows = extract_rows(device["_id"], "Salon", device.get("dashboard_data", {}),
+        rows = extract_rows(device["_id"], base_name, device.get("dashboard_data", {}),
                              device.get("last_status_store", 0))
         all_rows.extend(rows)
         for r in rows:

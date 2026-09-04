@@ -53,13 +53,13 @@ footer{margin-top:3rem;color:var(--text-muted);font-size:12px;}
 
 <div id="mainContent"></div>
 
-<footer>Salon &amp; Chambre = base station / Home Coach · Bureau = module intérieur additionnel · Extérieur &amp; Anémomètre = modules extérieurs. Données collectées toutes les 15 min via l'API Netatmo.</footer>
+<footer>Séjour = base station · Chambre = Home Coach · Cuisine = module intérieur additionnel · Extérieur &amp; Anémomètre = modules extérieurs. Données collectées toutes les 15 min via l'API Netatmo.</footer>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script>
-const COLORS={Salon:'#E8A33D',Chambre:'#D97A6C',Bureau:'#4FB6B0',Extérieur:'#8C86D6','Anémomètre':'#5C8AA6'};
+const COLORS={'Séjour':'#E8A33D',Chambre:'#D97A6C',Cuisine:'#4FB6B0',Extérieur:'#8C86D6','Anémomètre':'#5C8AA6'};
 const METRIC_LABEL={Temperature:'°C',Humidity:'%',CO2:'ppm',Noise:'dB',Pressure:'hPa',WindStrength:'km/h'};
 
 function pickColor(room,i){
