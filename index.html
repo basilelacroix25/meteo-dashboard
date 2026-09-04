@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Station météo — B3D</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Work+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0E1418; --panel:#161D22; --panel-2:#1B2329; --border:#262F35;
+  --text:#E8ECEE; --text-muted:#8B98A0;
+  --temp:#E8A33D; --hum:#4FB6B0; --co2:#7CA982; --press:#8C86D6; --wind:#5C8AA6; --noise:#D97A6C;
+}
+*{box-sizing:border-box;}
+body{margin:0;background:var(--bg);color:var(--text);font-family:'Work Sans',sans-serif;line-height:1.5;}
+.wrap{max-width:960px;margin:0 auto;padding:2.5rem 1.5rem 4rem;}
+header{margin-bottom:2rem;}
+h1{font-family:'Fraunces',serif;font-weight:500;font-size:2rem;margin:0 0 4px;}
+.sub{color:var(--text-muted);font-size:14px;}
+h2{font-family:'Fraunces',serif;font-weight:500;font-size:1.15rem;margin:2.5rem 0 1rem;}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px 16px;}
+.card .room{font-size:13px;color:var(--text-muted);margin-bottom:6px;}
+.card .val{font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:500;}
+.card .sub2{font-size:12px;color:var(--text-muted);margin-top:4px;font-family:'JetBrains Mono',monospace;}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:1rem;}
+.tabs button{background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 14px;font-size:13px;cursor:pointer;font-family:'Work Sans',sans-serif;}
+.tabs button.active{background:var(--panel-2);border-color:var(--text-muted);}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--text-muted);margin-bottom:10px;}
+.legend span{display:flex;align-items:center;gap:5px;}
+.dot{width:9px;height:9px;border-radius:2px;display:inline-block;}
+.chartbox{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px;height:230px;position:relative;margin-bottom:1.5rem;}
+.cal{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;}
+.calblock{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:10px;}
+.calblock p{font-size:12px;color:var(--text-muted);margin:0 0 6px;}
+.calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;}
+.calcell{width:100%;padding-bottom:100%;border-radius:2px;}
+.empty{background:var(--panel);border:1px dashed var(--border);border-radius:10px;padding:2rem;text-align:center;color:var(--text-muted);}
+.scale{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-muted);margin-top:8px;}
+.grad{width:90px;height:8px;border-radius:4px;}
+footer{margin-top:3rem;color:var(--text-muted);font-size:12px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>Station météo</h1>
+  <p class="sub" id="lastUpdate">En attente des premières données…</p>
+</header>
+
+<div class="cards" id="liveCards"></div>
+
+<div id="mainContent"></div>
+
+<footer>Salon &amp; Chambre = base station / Home Coach · Bureau = module intérieur additionnel · Extérieur &amp; Anémomètre = modules extérieurs. Données collectées toutes les 15 min via l'API Netatmo.</footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+const COLORS={Salon:'#E8A33D',Chambre:'#D97A6C',Bureau:'#4FB6B0',Extérieur:'#8C86D6','Anémomètre':'#5C8AA6'};
+const METRIC_LABEL={Temperature:'°C',Humidity:'%',CO2:'ppm',Noise:'dB',Pressure:'hPa',WindStrength:'km/h'};
+
+function pickColor(room,i){
+  if(COLORS[room])return COLORS[room];
+  const pool=['#E8A33D','#D97A6C','#4FB6B0','#8C86D6','#5C8AA6','#7CA982'];
+  return pool[i%pool.length];
+}
+
+async function loadLatest(){
+  try{
+    const res=await fetch('data/latest.json',{cache:'no-store'});
+    if(!res.ok)throw new Error('no data');
+    const json=await res.json();
+    renderCards(json);
+  }catch(e){
+    document.getElementById('lastUpdate').textContent="Pas encore de données — le premier relevé Netatmo n'a pas encore été collecté.";
+  }
+}
+
+function renderCards(json){
+  const upd=new Date(json.updated_utc);
+  document.getElementById('lastUpdate').textContent='Dernière mise à jour : '+upd.toLocaleString('fr-FR');
+  const wrap=document.getElementById('liveCards');
+  wrap.innerHTML='';
+  Object.entries(json.rooms).forEach(([room,metrics])=>{
+    const card=document.createElement('div');card.className='card';
+    const temp=metrics.Temperature!==undefined?metrics.Temperature.toFixed(1)+'°C':(metrics.WindStrength!==undefined?metrics.WindStrength+' km/h':'—');
+    const bits=[];
+    if(metrics.Humidity!==undefined)bits.push(Math.round(metrics.Humidity)+'% hum');
+    if(metrics.CO2!==undefined)bits.push(Math.round(metrics.CO2)+' ppm CO2');
+    if(metrics.Pressure!==undefined)bits.push(Math.round(metrics.Pressure)+' hPa');
+    if(metrics.Noise!==undefined)bits.push(Math.round(metrics.Noise)+' dB');
+    if(metrics.WindAngle!==undefined)bits.push(Math.round(metrics.WindAngle)+'°');
+    card.innerHTML=`<div class="room">${room}</div><div class="val">${temp}</div><div class="sub2">${bits.join(' · ')}</div>`;
+    wrap.appendChild(card);
+  });
+}
+
+async function loadHistory(){
+  try{
+    const res=await fetch('data/history.csv',{cache:'no-store'});
+    if(!res.ok)throw new Error('no history');
+    const text=await res.text();
+    if(!text.trim())throw new Error('empty');
+    const parsed=Papa.parse(text,{header:true,dynamicTyping:true,skipEmptyLines:true});
+    buildDashboard(parsed.data);
+  }catch(e){
+    document.getElementById('mainContent').innerHTML='<div class="empty">Pas encore d\'historique à afficher. Dès que le premier relevé sera collecté (toutes les 15 minutes une fois le workflow GitHub Actions activé), les graphes apparaîtront ici.</div>';
+  }
+}
+
+function buildDashboard(rows){
+  const rooms=[...new Set(rows.map(r=>r.module))];
+  const byRoomMetric={};
+  rows.forEach(r=>{
+    const key=r.module+'|'+r.metric;
+    if(!byRoomMetric[key])byRoomMetric[key]=[];
+    byRoomMetric[key].push({t:new Date(r.timestamp_utc),v:r.value});
+  });
+
+  const main=document.getElementById('mainContent');
+  main.innerHTML=`
+    <h2>Température</h2>
+    <div class="tabs" id="rangeTabs">
+      <button data-r="day">Jour</button><button data-r="week">Semaine</button>
+      <button data-r="month">Mois</button><button data-r="season">Saison</button><button data-r="year">Année</button>
+    </div>
+    <div class="legend" id="legend"></div>
+    <div class="chartbox"><canvas id="tempChart"></canvas></div>
+    <h2>Humidité</h2>
+    <div class="chartbox"><canvas id="humChart"></canvas></div>
+    <h2>CO2</h2>
+    <div class="chartbox"><canvas id="co2Chart"></canvas></div>
+    <h2>Calendrier — température moyenne par jour</h2>
+    <div class="cal" id="calHeat"></div>
+    <div class="scale"><span>Froid</span><div class="grad" style="background:linear-gradient(to right,#1B2329,#E8A33D)"></div><span>Chaud</span></div>
+  `;
+
+  const legend=document.getElementById('legend');
+  rooms.forEach((r,i)=>{
+    const el=document.createElement('span');
+    el.innerHTML=`<span class="dot" style="background:${pickColor(r,i)}"></span>${r}`;
+    legend.appendChild(el);
+  });
+
+  function seriesFor(metric,rangeDays){
+    const cutoff=new Date(Date.now()-rangeDays*86400000);
+    return rooms.map((room,i)=>{
+      const key=room+'|'+metric;
+      const pts=(byRoomMetric[key]||[]).filter(p=>p.t>=cutoff);
+      return {label:room,data:pts.map(p=>({x:p.t,y:p.v})),borderColor:pickColor(room,i),backgroundColor:pickColor(room,i),borderWidth:2,pointRadius:0,tension:0.25};
+    }).filter(s=>s.data.length>0);
+  }
+
+  let charts={};
+  function makeChart(id,metric,days,yLabel){
+    if(charts[id])charts[id].destroy();
+    charts[id]=new Chart(document.getElementById(id),{
+      type:'line',
+      data:{datasets:seriesFor(metric,days)},
+      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+        scales:{x:{type:'time',ticks:{color:'#8B98A0'},grid:{color:'#262F35'}},
+                y:{title:{display:true,text:yLabel,color:'#8B98A0'},ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}}}
+    });
+  }
+
+  const rangeDays={day:1,week:7,month:30,season:90,year:365};
+  function render(range){
+    const d=rangeDays[range];
+    makeChart('tempChart','Temperature',d,'°C');
+    makeChart('humChart','Humidity',d,'%');
+    makeChart('co2Chart','CO2',d,'ppm');
+  }
+  document.querySelectorAll('#rangeTabs button').forEach(b=>{
+    b.addEventListener('click',()=>{
+      document.querySelectorAll('#rangeTabs button').forEach(x=>x.classList.remove('active'));
+      b.classList.add('active');render(b.dataset.r);
+    });
+  });
+  document.querySelector('#rangeTabs button[data-r="week"]').classList.add('active');
+  render('week');
+
+  // Heatmap calendrier — température, toutes pièces confondues, par jour
+  const tempRows=rows.filter(r=>r.metric==='Temperature');
+  const byDay={};
+  tempRows.forEach(r=>{
+    const d=new Date(r.timestamp_utc);
+    const key=d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate();
+    if(!byDay[key])byDay[key]=[];
+    byDay[key].push(r.value);
+  });
+  const dayEntries=Object.entries(byDay).map(([k,vals])=>({key:k,avg:vals.reduce((a,b)=>a+b,0)/vals.length}));
+  if(dayEntries.length){
+    const vals=dayEntries.map(d=>d.avg);
+    const tmin=Math.min(...vals),tmax=Math.max(...vals);
+    const byMonth={};
+    dayEntries.forEach(d=>{
+      const [y,m,day]=d.key.split('-');
+      const mk=y+'-'+m;
+      if(!byMonth[mk])byMonth[mk]=[];
+      byMonth[mk].push(d);
+    });
+    const calWrap=document.getElementById('calHeat');
+    Object.entries(byMonth).sort().forEach(([mk,days])=>{
+      const block=document.createElement('div');block.className='calblock';
+      const [y,m]=mk.split('-');
+      block.innerHTML=`<p>${m}/${y}</p>`;
+      const grid=document.createElement('div');grid.className='calgrid';
+      days.forEach(d=>{
+        const norm=tmax>tmin?(d.avg-tmin)/(tmax-tmin):0.5;
+        const cell=document.createElement('div');cell.className='calcell';
+        cell.style.background=mix('1B2329','E8A33D',norm);
+        cell.title=d.key+' : '+d.avg.toFixed(1)+'°C';
+        grid.appendChild(cell);
+      });
+      block.appendChild(grid);
+      calWrap.appendChild(block);
+    });
+  }
+}
+
+function mix(hexA,hexB,t){
+  const pa=hexA.match(/\w\w/g).map(x=>parseInt(x,16));
+  const pb=hexB.match(/\w\w/g).map(x=>parseInt(x,16));
+  const c=pa.map((v,i)=>Math.round(v+(pb[i]-v)*t));
+  return 'rgb('+c.join(',')+')';
+}
+
+loadLatest();
+loadHistory();
+</script>
+</body>
+</html>
