@@ -19,6 +19,7 @@ header{margin-bottom:2rem;}
 h1{font-family:'Fraunces',serif;font-weight:500;font-size:2rem;margin:0 0 4px;}
 .sub{color:var(--text-muted);font-size:14px;}
 h2{font-family:'Fraunces',serif;font-weight:500;font-size:1.15rem;margin:2.5rem 0 1rem;}
+.hint{font-size:12px;color:var(--text-muted);margin:-8px 0 12px;}
 .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:1rem;}
 .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px;}
 .room-title{font-size:14px;color:var(--text);margin-bottom:10px;display:flex;align-items:center;gap:7px;font-weight:500;}
@@ -31,6 +32,7 @@ h2{font-family:'Fraunces',serif;font-weight:500;font-size:1.15rem;margin:2.5rem 
 .trend{display:inline-block;width:16px;text-align:center;margin-left:6px;color:var(--text-muted);flex-shrink:0;}
 .trend.up{color:#D64545;}
 .trend.down{color:#3E7CD6;}
+.minmax-italic{font-style:italic;font-size:11px;color:var(--text-muted);margin:-3px 0 4px;}
 .ext-card .wind-block{display:flex;align-items:center;gap:14px;margin-top:8px;border-top:1px solid var(--border);padding-top:10px;}
 .wind-rose{flex-shrink:0;}
 .wind-text{font-size:12px;color:var(--text-muted);}
@@ -40,9 +42,11 @@ h2{font-family:'Fraunces',serif;font-weight:500;font-size:1.15rem;margin:2.5rem 
 .tabs button.active{background:var(--panel-2);border-color:var(--text-muted);}
 .legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--text-muted);margin-bottom:10px;}
 .legend span{display:flex;align-items:center;gap:5px;}
+.legend .dash{width:16px;height:0;border-top:2px dashed var(--text-muted);display:inline-block;}
 .chartbox{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px;height:230px;position:relative;margin-bottom:1.5rem;}
-.barwrap{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:1.5rem;overflow-x:auto;}
-.barwrap canvas{height:220px !important;}
+.chartbox.small{height:170px;}
+.barwrap{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:1.5rem;height:190px;position:relative;}
+.rosewrap{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:1.5rem;height:280px;position:relative;max-width:340px;}
 .cal{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;}
 .calblock{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:10px;}
 .calblock p{font-size:12px;color:var(--text-muted);margin:0 0 6px;}
@@ -51,6 +55,8 @@ h2{font-family:'Fraunces',serif;font-weight:500;font-size:1.15rem;margin:2.5rem 
 .empty{background:var(--panel);border:1px dashed var(--border);border-radius:10px;padding:2rem;text-align:center;color:var(--text-muted);}
 .scale{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-muted);margin-top:8px;}
 .grad{width:90px;height:8px;border-radius:4px;}
+.insight-caption{font-size:13px;color:var(--text);margin:0 0 10px;}
+.insight-caption b{font-family:'JetBrains Mono',monospace;font-weight:500;}
 footer{margin-top:3rem;color:var(--text-muted);font-size:12px;}
 </style>
 </head>
@@ -74,7 +80,7 @@ footer{margin-top:3rem;color:var(--text-muted);font-size:12px;}
 <script>
 const ROOM_COLOR={'Séjour':'#3E7CD6','Cuisine':'#3FAE56','Chambre':'#D64545'};
 const EXT_COLOR='#B8C0C6';
-const METRIC_ORDER=['Temperature','Humidity','CO2','Noise','Pressure'];
+const METRIC_ORDER=['Temperature','Humidity','CO2','Noise'];
 const METRIC_LABEL={Temperature:'Température',Humidity:'Humidité',CO2:'CO2',Noise:'Bruit',Pressure:'Pression'};
 const METRIC_UNIT={Temperature:'°C',Humidity:'%',CO2:' ppm',Noise:' dB',Pressure:' hPa'};
 const METRIC_DECIMALS={Temperature:1,Humidity:0,CO2:0,Noise:0,Pressure:1};
@@ -85,6 +91,8 @@ const TOLERANCE={
   Noise:{idealLo:0,idealHi:45,hardLo:0,hardHi:70}
 };
 const TREND_EPS={Temperature:0.2,Humidity:2,CO2:20,Noise:2,Pressure:0.5,WindStrength:2};
+const COMPASS16=['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSO','SO','OSO','O','ONO','NO','NNO'];
+const COMPASS8=['N','NE','E','SE','S','SO','O','NO'];
 
 function mix3(a,b,k){return 'rgb('+a.map((v,i)=>Math.round(v+(b[i]-v)*k)).join(',')+')';}
 function gradientColor(t){
@@ -99,6 +107,10 @@ function pastilleColor(metric,value){
   if(value<r.idealLo)badness=(r.idealLo-value)/(r.idealLo-r.hardLo||1);
   else if(value>r.idealHi)badness=(value-r.idealHi)/(r.hardHi-r.idealHi||1);
   return gradientColor(Math.max(0,Math.min(1,badness)));
+}
+function compassLabel(angle){
+  const idx=Math.round(((angle%360)+360)%360/22.5)%16;
+  return COMPASS16[idx];
 }
 
 let byRoomMetric={};
@@ -116,11 +128,11 @@ function trendFor(module,metric){
   return {arrow:'→',cls:'flat'};
 }
 
-function metricRow(module,metric,value){
+function metricRow(module,metric,value,noPastille){
   const unit=METRIC_UNIT[metric]||'';
   const dec=METRIC_DECIMALS[metric]!==undefined?METRIC_DECIMALS[metric]:1;
   const displayVal=(typeof value==='number')?value.toFixed(dec):value;
-  const past=pastilleColor(metric,value);
+  const past=noPastille?null:pastilleColor(metric,value);
   const tr=trendFor(module,metric);
   return `<div class="metric-row">
     <span class="metric-label">${METRIC_LABEL[metric]||metric}</span>
@@ -130,19 +142,20 @@ function metricRow(module,metric,value){
   </div>`;
 }
 
-function windRoseSVG(angle,speed){
-  angle=angle||0;
+function windRoseSVG(angle){
+  const a=angle||0;
+  const goingTo=(a+180)%360;
   return `<svg class="wind-rose" width="84" height="84" viewBox="0 0 84 84">
     <circle cx="42" cy="42" r="38" fill="none" stroke="#262F35" stroke-width="1.5"/>
     <text x="42" y="10" fill="#8B98A0" font-size="9" text-anchor="middle">N</text>
     <text x="78" y="45" fill="#8B98A0" font-size="9" text-anchor="middle">E</text>
     <text x="42" y="79" fill="#8B98A0" font-size="9" text-anchor="middle">S</text>
     <text x="6" y="45" fill="#8B98A0" font-size="9" text-anchor="middle">O</text>
-    <g transform="rotate(${angle} 42 42)">
+    <g transform="rotate(${goingTo} 42 42)">
       <line x1="42" y1="42" x2="42" y2="16" stroke="#B8C0C6" stroke-width="3" stroke-linecap="round"/>
       <polygon points="42,10 37,20 47,20" fill="#B8C0C6"/>
     </g>
-    <text x="42" y="46" fill="#E8ECEE" font-size="13" text-anchor="middle" font-family="JetBrains Mono, monospace">${speed!==undefined?speed:'—'}</text>
+    <text x="42" y="46" fill="#E8ECEE" font-size="12" text-anchor="middle" font-family="JetBrains Mono, monospace">${compassLabel(a)}</text>
   </svg>`;
 }
 
@@ -157,30 +170,32 @@ async function fetchText(url){
   return res.text();
 }
 
-function renderCards(latest,rows){
+function renderCards(latest){
   const upd=new Date(latest.updated_utc);
   document.getElementById('lastUpdate').textContent='Dernière mise à jour : '+upd.toLocaleString('fr-FR');
   const wrap=document.getElementById('liveCards');
   wrap.innerHTML='';
   const rooms=latest.rooms||{};
 
-  // Carte Extérieur
   const ext=rooms['Extérieur']||{};
   const wind=rooms['Anémomètre']||{};
   const pressureSource=rooms['Séjour']||rooms['Chambre']||{};
-  const today=(upd.toISOString().slice(0,10));
+  const today=upd.toISOString().slice(0,10);
+  const extTempsToday=(byRoomMetric['Extérieur|Temperature']||[]).filter(p=>p.t.toISOString().slice(0,10)===today).map(p=>p.v);
   const gustToday=(byRoomMetric['Anémomètre|GustStrength']||[]).filter(p=>p.t.toISOString().slice(0,10)===today).map(p=>p.v);
   const maxDuJour=gustToday.length?Math.max(...gustToday):wind.GustStrength;
+  const minMaxLine=extTempsToday.length?`<p class="minmax-italic">min ${Math.min(...extTempsToday).toFixed(1)}° · max ${Math.max(...extTempsToday).toFixed(1)}° aujourd'hui</p>`:'';
 
   const extCard=document.createElement('div');
   extCard.className='card ext-card';
   extCard.innerHTML=`
     <div class="room-title">Extérieur</div>
-    ${ext.Temperature!==undefined?metricRow('Extérieur','Temperature',ext.Temperature):''}
-    ${ext.Humidity!==undefined?metricRow('Extérieur','Humidity',ext.Humidity):''}
-    ${pressureSource.Pressure!==undefined?metricRow('Séjour','Pressure',pressureSource.Pressure):''}
+    ${ext.Temperature!==undefined?metricRow('Extérieur','Temperature',ext.Temperature,true):''}
+    ${minMaxLine}
+    ${ext.Humidity!==undefined?metricRow('Extérieur','Humidity',ext.Humidity,true):''}
+    ${pressureSource.Pressure!==undefined?metricRow('Séjour','Pressure',pressureSource.Pressure,true):''}
     <div class="wind-block">
-      ${windRoseSVG(wind.WindAngle,wind.WindStrength)}
+      ${windRoseSVG(wind.WindAngle)}
       <div class="wind-text">
         Moyenne : <b>${wind.WindStrength!==undefined?wind.WindStrength:'—'} km/h</b><br>
         Rafale : <b>${wind.GustStrength!==undefined?wind.GustStrength:'—'} km/h</b><br>
@@ -190,7 +205,6 @@ function renderCards(latest,rows){
   `;
   wrap.appendChild(extCard);
 
-  // Cartes modules intérieurs
   ['Séjour','Cuisine','Chambre'].forEach(room=>{
     const metrics=rooms[room];
     if(!metrics)return;
@@ -211,7 +225,7 @@ function buildDailyMinMaxChart(rows){
     if(!byDay[key])byDay[key]=[];
     byDay[key].push(r.value);
   });
-  const days=Object.keys(byDay).sort().slice(-60);
+  const days=Object.keys(byDay).sort().slice(-7);
   if(!days.length)return;
   const weekdays=['dim.','lun.','mar.','mer.','jeu.','ven.','sam.'];
   const labels=days.map(k=>{
@@ -221,14 +235,11 @@ function buildDailyMinMaxChart(rows){
   const mins=days.map(k=>Math.min(...byDay[k]));
   const maxs=days.map(k=>Math.max(...byDay[k]));
 
-  const barWidth=64;
-  const canvasWidth=Math.max(days.length*barWidth,300);
-
-  const main=document.getElementById('mainContent');
-  main.insertAdjacentHTML('beforeend',`
+  const slot=document.getElementById('minmaxSlot');
+  slot.innerHTML=`
     <h2>Min / max journaliers — Extérieur</h2>
-    <div class="barwrap" id="barScroll"><div style="width:${canvasWidth}px;height:220px;"><canvas id="minmaxChart"></canvas></div></div>
-  `);
+    <div class="barwrap"><canvas id="minmaxChart"></canvas></div>
+  `;
 
   const minmaxLabels={
     id:'minmaxLabels',
@@ -251,9 +262,9 @@ function buildDailyMinMaxChart(rows){
     type:'bar',
     data:{labels, datasets:[{
       data: mins.map((mn,i)=>[mn,maxs[i]]),
-      backgroundColor:'#3E7CD6',
-      borderRadius:4,
-      barThickness:22
+      backgroundColor:'#F2F4F5',
+      borderRadius:999,
+      barThickness:26
     }]},
     options:{
       responsive:true, maintainAspectRatio:false,
@@ -266,8 +277,88 @@ function buildDailyMinMaxChart(rows){
     },
     plugins:[minmaxLabels]
   });
-  const scroller=document.getElementById('barScroll');
-  scroller.scrollLeft=scroller.scrollWidth;
+}
+
+function buildWindRose7d(){
+  const cutoff=new Date(Date.now()-7*86400000);
+  const anglePts=(byRoomMetric['Anémomètre|WindAngle']||[]).filter(p=>p.t>=cutoff);
+  if(!anglePts.length)return;
+  const speedPts=byRoomMetric['Anémomètre|WindStrength']||[];
+  const sums=new Array(8).fill(0), counts=new Array(8).fill(0);
+  anglePts.forEach(p=>{
+    const idx=Math.round(((p.v%360)+360)%360/45)%8;
+    let best=null,bestDiff=Infinity;
+    speedPts.forEach(sp=>{const diff=Math.abs(sp.t-p.t);if(diff<bestDiff){bestDiff=diff;best=sp.v;}});
+    if(best!==null){sums[idx]+=best;counts[idx]++;}
+  });
+  const values=sums.map((s,i)=>counts[i]?Math.round((s/counts[i])*10)/10:0);
+
+  const main=document.getElementById('mainContent');
+  main.insertAdjacentHTML('beforeend',`
+    <h2>Rose des vents — moyenne 7 derniers jours</h2>
+    <div class="rosewrap"><canvas id="rose7d"></canvas></div>
+  `);
+  new Chart(document.getElementById('rose7d'),{
+    type:'polarArea',
+    data:{labels:COMPASS8, datasets:[{data:values,backgroundColor:'rgba(62,124,214,0.55)',borderColor:'#3E7CD6'}]},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:(ctx)=>ctx.formattedValue+' km/h'}}},
+      scales:{r:{ticks:{color:'#8B98A0',backdropColor:'transparent'},grid:{color:'#262F35'},angleLines:{color:'#262F35'},pointLabels:{color:'#8B98A0'}}}
+    }
+  });
+}
+
+function hourlyProfile(module,metric,days){
+  const cutoff=new Date(Date.now()-days*86400000);
+  const buckets=Array.from({length:24},()=>[]);
+  (byRoomMetric[module+'|'+metric]||[]).filter(p=>p.t>=cutoff).forEach(p=>{
+    buckets[p.t.getHours()].push(p.v);
+  });
+  return buckets.map(arr=>arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:null);
+}
+
+function buildRiseFallChart(days){
+  const profile=hourlyProfile('Extérieur','Temperature',days);
+  const known=profile.map((v,h)=>v!==null?h:null).filter(h=>h!==null);
+  const caption=document.getElementById('riseFallCaption');
+  const canvasWrap=document.getElementById('riseFallCanvasWrap');
+  if(!known.length){
+    caption.innerHTML='Pas assez de données horaires sur cette période pour estimer les heures de montée/descente.';
+    canvasWrap.innerHTML='';
+    return;
+  }
+  let minH=known[0],maxH=known[0];
+  known.forEach(h=>{if(profile[h]<profile[minH])minH=h;if(profile[h]>profile[maxH])maxH=h;});
+  caption.innerHTML=`La température extérieure commence à <b>monter vers ${minH}h</b> et à <b>redescendre vers ${maxH}h</b> (moyenne sur les ${days} derniers jours).`;
+  canvasWrap.innerHTML='<canvas id="riseFallChart"></canvas>';
+
+  const markerPlugin={
+    id:'markers',
+    afterDatasetsDraw(chart){
+      const {ctx,chartArea,scales}=chart;
+      ctx.save();
+      [[minH,'#3E7CD6','↑'],[maxH,'#D64545','↓']].forEach(([h,color,sym])=>{
+        const x=scales.x.getPixelForValue(h);
+        ctx.strokeStyle=color; ctx.setLineDash([4,3]);
+        ctx.beginPath(); ctx.moveTo(x,chartArea.top); ctx.lineTo(x,chartArea.bottom); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle=color; ctx.font='11px JetBrains Mono, monospace'; ctx.textAlign='center';
+        ctx.fillText(sym+' '+h+'h', x, chartArea.top-4);
+      });
+      ctx.restore();
+    }
+  };
+
+  new Chart(document.getElementById('riseFallChart'),{
+    type:'line',
+    data:{labels:profile.map((_,h)=>h+'h'),datasets:[{data:profile,borderColor:'#B8C0C6',backgroundColor:'rgba(184,192,198,0.1)',fill:true,spanGaps:true,tension:0.35,pointRadius:0}]},
+    options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:24}},
+      plugins:{legend:{display:false}},
+      scales:{x:{ticks:{color:'#8B98A0',maxTicksLimit:12},grid:{display:false}},
+              y:{ticks:{color:'#8B98A0'},grid:{color:'#262F35'},title:{display:true,text:'°C',color:'#8B98A0'}}}},
+    plugins:[markerPlugin]
+  });
 }
 
 function buildDashboard(rows){
@@ -278,7 +369,7 @@ function buildDashboard(rows){
     byRoomMetric[key].push({t:new Date(r.timestamp_utc),v:r.value});
   });
 
-  const rooms=[...new Set(rows.map(r=>r.module))];
+  const rooms=[...new Set(rows.map(r=>r.module))].filter(r=>r!=='Anémomètre');
   function colorFor(room){return ROOM_COLOR[room]||EXT_COLOR;}
 
   const main=document.getElementById('mainContent');
@@ -294,6 +385,14 @@ function buildDashboard(rows){
     <div class="chartbox"><canvas id="humChart"></canvas></div>
     <h2>CO2</h2>
     <div class="chartbox"><canvas id="co2Chart"></canvas></div>
+    <h2>Vent</h2>
+    <div class="legend"><span><span class="dot" style="background:#3E7CD6"></span>Moyenne</span><span><span class="dash"></span>Rafale</span></div>
+    <p class="hint">Les triangles indiquent la direction vers laquelle souffle le vent à cet instant.</p>
+    <div class="chartbox"><canvas id="windChart"></canvas></div>
+    <h2>À quelle heure ça monte / ça descend ?</h2>
+    <p class="insight-caption" id="riseFallCaption"></p>
+    <div class="chartbox small" id="riseFallCanvasWrap"></div>
+    <div id="minmaxSlot"></div>
     <h2>Calendrier — température moyenne par jour</h2>
     <div class="cal" id="calHeat"></div>
     <div class="scale"><span>Froid</span><div class="grad" style="background:linear-gradient(to right,#1B2329,#3E7CD6)"></div><span>Chaud</span></div>
@@ -315,12 +414,30 @@ function buildDashboard(rows){
     }).filter(s=>s.data.length>0);
   }
 
+  function angleAtNearest(anglePts,t){
+    let best=0,bestDiff=Infinity;
+    anglePts.forEach(p=>{const diff=Math.abs(p.t-t);if(diff<bestDiff){bestDiff=diff;best=p.v;}});
+    return best;
+  }
+  function windSeries(rangeDays){
+    const cutoff=new Date(Date.now()-rangeDays*86400000);
+    const avgPts=(byRoomMetric['Anémomètre|WindStrength']||[]).filter(p=>p.t>=cutoff);
+    const gustPts=(byRoomMetric['Anémomètre|GustStrength']||[]).filter(p=>p.t>=cutoff);
+    const anglePts=byRoomMetric['Anémomètre|WindAngle']||[];
+    return [
+      {label:'Moyenne',data:avgPts.map(p=>({x:p.t,y:p.v})),borderColor:'#3E7CD6',backgroundColor:'#3E7CD6',
+       borderWidth:2,pointRadius:4,pointStyle:'triangle',rotation:avgPts.map(p=>(angleAtNearest(anglePts,p.t)+180)%360),tension:0.25},
+      {label:'Rafale',data:gustPts.map(p=>({x:p.t,y:p.v})),borderColor:'#3E7CD6',backgroundColor:'#3E7CD6',
+       borderWidth:2,pointRadius:0,borderDash:[6,4],tension:0.25}
+    ].filter(s=>s.data.length>0);
+  }
+
   let charts={};
-  function makeChart(id,metric,days,yLabel){
+  function makeChart(id,dataset,yLabel){
     if(charts[id])charts[id].destroy();
     charts[id]=new Chart(document.getElementById(id),{
       type:'line',
-      data:{datasets:seriesFor(metric,days)},
+      data:{datasets:dataset},
       options:{
         responsive:true,maintainAspectRatio:false,
         interaction:{mode:'index',intersect:false},
@@ -334,9 +451,11 @@ function buildDashboard(rows){
   const rangeDays={day:1,week:7,month:30,season:90,year:365};
   function render(range){
     const d=rangeDays[range];
-    makeChart('tempChart','Temperature',d,'°C');
-    makeChart('humChart','Humidity',d,'%');
-    makeChart('co2Chart','CO2',d,'ppm');
+    makeChart('tempChart',seriesFor('Temperature',d),'°C');
+    makeChart('humChart',seriesFor('Humidity',d),'%');
+    makeChart('co2Chart',seriesFor('CO2',d),'ppm');
+    makeChart('windChart',windSeries(d),'km/h');
+    buildRiseFallChart(d);
   }
   document.querySelectorAll('#rangeTabs button').forEach(b=>{
     b.addEventListener('click',()=>{
@@ -348,8 +467,8 @@ function buildDashboard(rows){
   render('week');
 
   buildDailyMinMaxChart(rows);
+  buildWindRose7d();
 
-  // Heatmap calendrier — température, toutes pièces confondues, par jour
   const tempRows=rows.filter(r=>r.metric==='Temperature');
   const byDay={};
   tempRows.forEach(r=>{
@@ -413,7 +532,7 @@ async function init(){
   }catch(e){}
 
   if(latest){
-    renderCards(latest,rows);
+    renderCards(latest);
   }else{
     document.getElementById('lastUpdate').textContent="Pas encore de données — le premier relevé Netatmo n'a pas encore été collecté.";
   }
