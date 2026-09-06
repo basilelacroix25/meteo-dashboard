@@ -167,8 +167,8 @@ function windRoseSVG(angle){
     <text x="42" y="79" fill="#8B98A0" font-size="9" text-anchor="middle">S</text>
     <text x="6" y="45" fill="#8B98A0" font-size="9" text-anchor="middle">O</text>
     <g transform="rotate(${goingTo} 42 42)">
-      <line x1="42" y1="42" x2="42" y2="14" stroke="#B8C0C6" stroke-width="3" stroke-linecap="round"/>
-      <polygon points="42,8 36,19 48,19" fill="#B8C0C6"/>
+      <line x1="42" y1="70" x2="42" y2="26" stroke="#B8C0C6" stroke-width="3" stroke-linecap="round"/>
+      <polygon points="42,12 35,26 49,26" fill="#B8C0C6"/>
     </g>
   </svg>`;
 }
@@ -216,8 +216,13 @@ function renderCards(latest){
         Max du jour : <b>${maxDuJour!==undefined?maxDuJour:'—'} km/h</b>
       </div>
     </div>
+    <div class="wind-block" style="margin-top:6px;">
+      <div style="width:84px;height:84px;flex-shrink:0;"><canvas id="extDailyRose" width="84" height="84"></canvas></div>
+      <div class="wind-text">Répartition des<br>directions,<br>moyenne du jour</div>
+    </div>
   `;
   wrap.appendChild(extCard);
+  buildExtDailyRose();
 
   ['Séjour','Cuisine','Chambre'].forEach(room=>{
     const metrics=rooms[room];
@@ -304,34 +309,68 @@ function buildDailyMinMaxChart(rows){
   });
 }
 
+function computeWindBins(anglePts,speedPts,nDirs){
+  const sums=new Array(nDirs).fill(0), counts=new Array(nDirs).fill(0);
+  const step=360/nDirs;
+  anglePts.forEach(p=>{
+    const idx=Math.round(((p.v%360)+360)%360/step)%nDirs;
+    let best=null,bestDiff=Infinity;
+    speedPts.forEach(sp=>{const diff=Math.abs(sp.t-p.t);if(diff<bestDiff){bestDiff=diff;best=sp.v;}});
+    if(best!==null){sums[idx]+=best;counts[idx]++;}
+  });
+  return sums.map((s,i)=>counts[i]?Math.round((s/counts[i])*10)/10:0);
+}
+function renderRoseChart(canvasId,values,labels,opts){
+  opts=opts||{};
+  const n=labels.length;
+  return new Chart(document.getElementById(canvasId),{
+    type:'polarArea',
+    data:{labels,datasets:[{data:values,backgroundColor:'rgba(184,192,198,0.55)',borderColor:'#E8ECEE',borderWidth:1}]},
+    options:{
+      responsive: opts.responsive!==false,
+      maintainAspectRatio:false,
+      startAngle:-(360/n)/2,
+      plugins:{
+        legend:{display:false},
+        tooltip:{enabled:opts.tooltip!==false,callbacks:{label:(ctx)=>ctx.label+' : '+ctx.formattedValue+' km/h'}}
+      },
+      scales:{r:{
+        ticks:{color:'#8B98A0',backdropColor:'transparent',font:{size:9},showLabelBackdrop:false},
+        grid:{color:'#262F35'},
+        angleLines:{color:'#262F35'},
+        pointLabels:{display:opts.pointLabels!==false,color:'#B8C0C6',font:{size:opts.labelSize||11,weight:'600'}}
+      }}
+    }
+  });
+}
+
 function buildWindRose7d(){
   const cutoff=new Date(Date.now()-7*86400000);
   const anglePts=(byRoomMetric['Anémomètre|WindAngle']||[]).filter(p=>p.t>=cutoff);
   if(!anglePts.length)return;
   const speedPts=byRoomMetric['Anémomètre|WindStrength']||[];
-  const sums=new Array(8).fill(0), counts=new Array(8).fill(0);
-  anglePts.forEach(p=>{
-    const idx=Math.round(((p.v%360)+360)%360/45)%8;
-    let best=null,bestDiff=Infinity;
-    speedPts.forEach(sp=>{const diff=Math.abs(sp.t-p.t);if(diff<bestDiff){bestDiff=diff;best=sp.v;}});
-    if(best!==null){sums[idx]+=best;counts[idx]++;}
-  });
-  const values=sums.map((s,i)=>counts[i]?Math.round((s/counts[i])*10)/10:0);
+  const values=computeWindBins(anglePts,speedPts,16);
 
   const main=document.getElementById('mainContent');
   main.insertAdjacentHTML('beforeend',`
     <h2>Rose des vents — moyenne 7 derniers jours</h2>
     <div class="rosewrap"><canvas id="rose7d"></canvas></div>
   `);
-  new Chart(document.getElementById('rose7d'),{
-    type:'polarArea',
-    data:{labels:COMPASS8, datasets:[{data:values,backgroundColor:'rgba(184,192,198,0.5)',borderColor:'#8B98A0'}]},
-    options:{
-      responsive:true, maintainAspectRatio:false,
-      plugins:{legend:{display:false},tooltip:{callbacks:{label:(ctx)=>ctx.formattedValue+' km/h'}}},
-      scales:{r:{ticks:{color:'#8B98A0',backdropColor:'transparent'},grid:{color:'#262F35'},angleLines:{color:'#262F35'},pointLabels:{color:'#8B98A0'}}}
-    }
-  });
+  renderRoseChart('rose7d',values,COMPASS16,{labelSize:11});
+}
+
+function buildExtDailyRose(){
+  const today=new Date().toISOString().slice(0,10);
+  const anglePts=(byRoomMetric['Anémomètre|WindAngle']||[]).filter(p=>p.t.toISOString().slice(0,10)===today);
+  const canvas=document.getElementById('extDailyRose');
+  if(!canvas)return;
+  if(!anglePts.length){
+    canvas.parentElement.innerHTML='<span style="font-size:11px;color:var(--text-muted);">Pas encore assez de relevés aujourd\'hui</span>';
+    return;
+  }
+  const speedPts=byRoomMetric['Anémomètre|WindStrength']||[];
+  const values=computeWindBins(anglePts,speedPts,8);
+  renderRoseChart('extDailyRose',values,COMPASS8,{responsive:false,pointLabels:false,tooltip:false});
 }
 
 function hourlyProfile(module,metric,days){
@@ -428,17 +467,39 @@ function buildYesterdayCompare(){
     caption.innerHTML="Hier, l'extérieur est resté du même côté (au-dessus ou en dessous) du Séjour toute la journée.";
   }
   canvasWrap.innerHTML=chartWrap('yesterdayChart','°C');
+
+  const crossMarkers={
+    id:'crossMarkers',
+    afterDatasetsDraw(chart){
+      const {ctx,chartArea,scales}=chart;
+      ctx.save();
+      crossings.forEach(c=>{
+        const x=scales.x.getPixelForValue(c.t);
+        const color=c.dir===-1?'#D64545':'#3E7CD6';
+        const sym=c.dir===-1?'↓':'↑';
+        const hh=c.t.getHours().toString().padStart(2,'0')+':'+c.t.getMinutes().toString().padStart(2,'0');
+        ctx.strokeStyle=color; ctx.setLineDash([4,3]);
+        ctx.beginPath(); ctx.moveTo(x,chartArea.top); ctx.lineTo(x,chartArea.bottom); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle=color; ctx.font='11px JetBrains Mono, monospace'; ctx.textAlign='center';
+        ctx.fillText(sym+' '+hh, x, chartArea.top-4);
+      });
+      ctx.restore();
+    }
+  };
+
   new Chart(document.getElementById('yesterdayChart'),{
     type:'line',
     data:{datasets:[
-      {label:'Extérieur',data:extPts.map(p=>({x:p.t,y:p.v})),borderColor:'#E8ECEE',backgroundColor:'#E8ECEE',borderWidth:2,pointRadius:0,tension:0.25},
-      {label:'Séjour',data:sejPts.map(p=>({x:p.t,y:p.v})),borderColor:'#3E7CD6',backgroundColor:'#3E7CD6',borderWidth:2,pointRadius:0,tension:0.25}
+      {label:'Extérieur',data:extPts.map(p=>({x:p.t,y:p.v})),borderColor:'#E8ECEE',backgroundColor:'rgba(232,236,238,0.12)',fill:true,borderWidth:2,pointRadius:0,tension:0.3},
+      {label:'Séjour',data:sejPts.map(p=>({x:p.t,y:p.v})),borderColor:'#3E7CD6',backgroundColor:'#3E7CD6',borderWidth:2,pointRadius:0,tension:0.3}
     ]},
-    options:{responsive:true,maintainAspectRatio:false,
+    options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:24}},
       interaction:{mode:'index',intersect:false},
       plugins:{legend:{display:false},tooltip:{callbacks:{label:(ctx)=>ctx.dataset.label+': '+ctx.parsed.y.toFixed(1)+'°C'}}},
-      scales:{x:{type:'time',ticks:{color:'#8B98A0'},grid:{color:'#262F35'}},
-              y:{ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}}}
+      scales:{x:{type:'time',ticks:{color:'#8B98A0'},grid:{display:false}},
+              y:{ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}}},
+    plugins:[crossMarkers]
   });
 }
 
