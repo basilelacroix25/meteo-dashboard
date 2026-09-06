@@ -324,21 +324,17 @@ function computeWindBins(anglePts,speedPts,nDirs){
 }
 function renderRoseChart(canvasId,values,labels,opts){
   opts=opts||{};
-  const n=labels.length;
-  const start=-(360/n)/2;
   return new Chart(document.getElementById(canvasId),{
     type:'polarArea',
     data:{labels,datasets:[{data:values,backgroundColor:'rgba(184,192,198,0.55)',borderColor:'#E8ECEE',borderWidth:1}]},
     options:{
       responsive: opts.responsive!==false,
-      startAngle:start,
       maintainAspectRatio:false,
       plugins:{
         legend:{display:false},
         tooltip:{enabled:opts.tooltip!==false,callbacks:{label:(ctx)=>ctx.label+' : '+ctx.formattedValue+' km/h'}}
       },
       scales:{r:{
-        startAngle:start,
         ticks:{color:'#8B98A0',backdropColor:'transparent',font:{size:9},showLabelBackdrop:false},
         grid:{color:'#262F35'},
         angleLines:{color:'#262F35'},
@@ -447,16 +443,25 @@ function buildRiseFallChart(days){
     afterDatasetsDraw(chart){
       const {ctx,chartArea,scales}=chart;
       ctx.save();
-      const marks=[[minH,'#3E7CD6','↑ '+minH+'h'],[maxH,'#D64545','↓ '+maxH+'h']];
-      if(sun.sunrise!==null)marks.push([sun.sunrise,'#E8C34A','☀ '+fmtH(sun.sunrise)]);
-      if(sun.sunset!==null)marks.push([sun.sunset,'#E8C34A','☾ '+fmtH(sun.sunset)]);
-      marks.forEach(([h,color,label])=>{
+      const tempMarks=[[minH,'#3E7CD6','↑ '+minH+'h'],[maxH,'#D64545','↓ '+maxH+'h']];
+      const sunMarks=[];
+      if(sun.sunrise!==null)sunMarks.push([sun.sunrise,'#E8C34A','☀ '+fmtH(sun.sunrise)]);
+      if(sun.sunset!==null)sunMarks.push([sun.sunset,'#E8C34A','☾ '+fmtH(sun.sunset)]);
+      tempMarks.forEach(([h,color,label])=>{
         const x=scales.x.getPixelForValue(h);
-        ctx.strokeStyle=color; ctx.setLineDash(color==='#E8C34A'?[2,3]:[4,3]);
+        ctx.strokeStyle=color; ctx.setLineDash([4,3]);
         ctx.beginPath(); ctx.moveTo(x,chartArea.top); ctx.lineTo(x,chartArea.bottom); ctx.stroke();
         ctx.setLineDash([]);
         ctx.fillStyle=color; ctx.font='11px JetBrains Mono, monospace'; ctx.textAlign='center';
-        ctx.fillText(label, x, chartArea.top-4);
+        ctx.fillText(label, x, chartArea.top-16);
+      });
+      sunMarks.forEach(([h,color,label])=>{
+        const x=scales.x.getPixelForValue(h);
+        ctx.strokeStyle=color; ctx.setLineDash([2,3]);
+        ctx.beginPath(); ctx.moveTo(x,chartArea.top); ctx.lineTo(x,chartArea.bottom); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle=color; ctx.font='11px JetBrains Mono, monospace'; ctx.textAlign='center';
+        ctx.fillText(label, x, chartArea.top-3);
       });
       ctx.restore();
     }
@@ -465,7 +470,7 @@ function buildRiseFallChart(days){
   new Chart(document.getElementById('riseFallChart'),{
     type:'line',
     data:{datasets:[{data:profile.map((v,h)=>({x:h,y:v})),borderColor:'#B8C0C6',backgroundColor:'rgba(184,192,198,0.1)',fill:true,spanGaps:true,tension:0.35,pointRadius:0}]},
-    options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:24}},
+    options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:36}},
       plugins:{legend:{display:false},tooltip:{callbacks:{label:(ctx)=>ctx.parsed.y.toFixed(1)+'°C'}}},
       scales:{x:{type:'linear',min:0,max:23,ticks:{color:'#8B98A0',stepSize:2,callback:(v)=>v+'h'},grid:{display:false}},
               y:{ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}}},
@@ -473,7 +478,43 @@ function buildRiseFallChart(days){
   });
 }
 
-function buildYesterdayCompare(){
+function buildDayOverlayChart(days){
+  const canvasWrap=document.getElementById('dayOverlayCanvasWrap');
+  const now=new Date();
+  const opacities=[1,0.55,0.32,0.16];
+  const labels=['Aujourd\'hui','J-'+days,'J-'+(2*days),'J-'+(3*days)];
+  const datasets=[];
+  for(let k=0;k<4;k++){
+    const dayStart=new Date(now); dayStart.setHours(0,0,0,0); dayStart.setDate(dayStart.getDate()-k*days);
+    const dayEnd=new Date(dayStart); dayEnd.setDate(dayEnd.getDate()+1);
+    const pts=(byRoomMetric['Extérieur|Temperature']||[]).filter(p=>p.t>=dayStart&&p.t<dayEnd);
+    if(!pts.length)continue;
+    datasets.push({
+      label:labels[k],
+      data:pts.map(p=>({x:p.t.getHours()+p.t.getMinutes()/60,y:p.v})),
+      borderColor:`rgba(232,236,238,${opacities[k]})`,
+      backgroundColor:`rgba(232,236,238,${opacities[k]})`,
+      borderWidth:k===0?2.5:1.5,
+      pointRadius:0,tension:0.3
+    });
+  }
+  if(!datasets.length){
+    canvasWrap.innerHTML='<div class="empty" style="height:100%;display:flex;align-items:center;justify-content:center;">Pas assez de données Extérieur sur cette période.</div>';
+    return;
+  }
+  canvasWrap.innerHTML=chartWrap('dayOverlayChart','°C');
+  new Chart(document.getElementById('dayOverlayChart'),{
+    type:'line',
+    data:{datasets},
+    options:{responsive:true,maintainAspectRatio:false,
+      interaction:{mode:'index',intersect:false},
+      plugins:{legend:{display:true,position:'top',labels:{color:'#8B98A0',boxWidth:12,font:{size:11}}},
+               tooltip:{callbacks:{label:(ctx)=>(ctx.dataset.label||'')+': '+ctx.parsed.y.toFixed(1)+'°C'}}},
+      scales:{x:{type:'linear',min:0,max:23,ticks:{color:'#8B98A0',stepSize:2,callback:(v)=>v+'h'},grid:{display:false}},
+              y:{ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}}}
+  });
+}
+
   const now=new Date();
   const startY=new Date(now); startY.setHours(0,0,0,0); startY.setDate(startY.getDate()-1);
   const endY=new Date(startY); endY.setDate(endY.getDate()+1);
@@ -667,6 +708,8 @@ function buildDashboard(rows){
     <h2>À quelle heure ça monte / ça descend ?</h2>
     <p class="insight-caption" id="riseFallCaption"></p>
     <div class="chartbox small" id="riseFallCanvasWrap"></div>
+    <h2>Aujourd'hui vs jours précédents — Extérieur</h2>
+    <div class="chartbox" id="dayOverlayCanvasWrap"></div>
     <h2>Hier : extérieur vs Séjour</h2>
     <p class="insight-caption" id="yesterdayCaption"></p>
     <div class="chartbox small" id="yesterdayCanvasWrap"></div>
@@ -718,6 +761,7 @@ function buildDashboard(rows){
     if(charts['windChart'])charts['windChart'].destroy();
     charts['windChart']=buildWindChart(d);
     buildRiseFallChart(d);
+    buildDayOverlayChart(d);
   }
   document.querySelectorAll('#rangeTabs button').forEach(b=>{
     b.addEventListener('click',()=>{
