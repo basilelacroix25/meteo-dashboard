@@ -15446,3 +15446,9 @@ timestamp_utc,module,metric,value
 2026-09-06T11:08:45+00:00,Chambre,Noise,34
 2026-09-06T11:08:45+00:00,Chambre,Pressure,1021.6
 2026-09-06T11:08:45+00:00,Chambre,health_idx,0
+2026-09-06T11:18:49+00:00,Chambre,Temperature,25.3
+2026-09-06T11:18:49+00:00,Chambre,Humidity,51
+2026-09-06T11:18:49+00:00,Chambre,CO2,466
+2026-09-06T11:18:49+00:00,Chambre,Noise,33
+2026-09-06T11:18:49+00:00,Chambre,Pressure,1021.6
+2026-09-06T11:18:49+00:00,Chambre,health_idx,0
