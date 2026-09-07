@@ -104,9 +104,20 @@ const TREND_EPS={Temperature:0.2,Humidity:2,CO2:20,Noise:2,Pressure:0.5,WindStre
 const COMPASS16=['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSO','SO','OSO','O','ONO','NO','NNO'];
 
 // chartjs-plugin-zoom s'enregistre automatiquement via son build UMD.
+let syncedCharts=[];
+function syncZoomPan(sourceChart){
+  const xs=sourceChart.scales.x;
+  if(!xs)return;
+  syncedCharts.forEach(c=>{
+    if(c===sourceChart||c.destroyed)return;
+    c.options.scales.x.min=xs.min;
+    c.options.scales.x.max=xs.max;
+    c.update('none');
+  });
+}
 const ZOOM_OPTS={
-  pan:{enabled:true,mode:'x'},
-  zoom:{wheel:{enabled:true},pinch:{enabled:true},mode:'x'}
+  pan:{enabled:true,mode:'x',onPanComplete:({chart})=>syncZoomPan(chart)},
+  zoom:{wheel:{enabled:true},pinch:{enabled:true},mode:'x',onZoomComplete:({chart})=>syncZoomPan(chart)}
 };
 const crosshairPlugin={
   id:'crosshair',
@@ -232,7 +243,8 @@ function buildRoseSVG(values,n,size,opts){
     const angle=i*step;
     const a0=angle-step/2, a1=angle+step/2;
     const r=Math.max(2,(values[i]/vmax)*maxR);
-    bars+=`<path d="${wedgePath(cx,cy,0,r,a0,a1)}" fill="rgba(184,192,198,0.55)" stroke="#E8ECEE" stroke-width="0.6"><title>${compassLabel(angle)} : ${values[i]} km/h</title></path>`;
+    const clickAttr=opts.captionId?` onclick="handleRoseClick(this)" data-dir="${compassLabel(angle)}" data-value="${values[i]}" data-caption="${opts.captionId}" style="cursor:pointer"`:'';
+    bars+=`<path d="${wedgePath(cx,cy,0,r,a0,a1)}" fill="rgba(184,192,198,0.55)" stroke="#E8ECEE" stroke-width="0.6"${clickAttr}><title>${compassLabel(angle)} : ${values[i]} km/h</title></path>`;
   }
   let grids='';
   if(opts.grid!==false){
@@ -259,6 +271,14 @@ function buildRoseSVG(values,n,size,opts){
     arrow+=`<polygon points="${tip[0]},${tip[1]} ${wingL[0]},${wingL[1]} ${wingR[0]},${wingR[1]}" fill="#E8ECEE"/>`;
   }
   return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${grids}${bars}${arrow}${labels}</svg>`;
+}
+
+function handleRoseClick(el){
+  const dir=el.getAttribute('data-dir');
+  const val=el.getAttribute('data-value');
+  const capId=el.getAttribute('data-caption');
+  const cap=capId&&document.getElementById(capId);
+  if(cap)cap.innerHTML=`<b>${dir}</b> : <b>${val} km/h</b>`;
 }
 
 async function fetchJSON(url){
@@ -494,7 +514,8 @@ function buildWindRose7d(){
   const main=document.getElementById('mainContent');
   main.insertAdjacentHTML('beforeend',`
     <h2>Rose des vents — moyenne 7 derniers jours</h2>
-    <div class="rosewrap" style="display:flex;align-items:center;justify-content:center;">${buildRoseSVG(values,16,220,{grid:true,labels:true})}</div>
+    <p class="insight-caption" id="roseCaption7d">Touche un secteur pour voir sa valeur.</p>
+    <div class="rosewrap" style="display:flex;align-items:center;justify-content:center;">${buildRoseSVG(values,16,220,{grid:true,labels:true,captionId:'roseCaption7d'})}</div>
   `);
 }
 
@@ -613,19 +634,15 @@ function buildDayOverlayChart(days){
   for(let k=0;k<4;k++){
     const winEnd=new Date(now.getTime()-k*days*86400000);
     const winStart=new Date(now.getTime()-(k+1)*days*86400000);
-    const pts=(byRoomMetric['Extérieur|Temperature']||[]).filter(p=>p.t>=winStart&&p.t<winEnd);
+    const pts=(byRoomMetric['Extérieur|Temperature']||[]).filter(p=>p.t>=winStart&&p.t<winEnd).sort((a,b)=>a.t-b.t);
     if(!pts.length)continue;
-    const buckets=Array.from({length:24},()=>[]);
-    pts.forEach(p=>buckets[p.t.getHours()].push(p.v));
-    const profile=buckets.map((arr,h)=>arr.length?{x:h,y:arr.reduce((a,b)=>a+b,0)/arr.length}:null).filter(v=>v!==null);
-    if(!profile.length)continue;
     datasets.push({
       label:labels[k],
-      data:profile,
+      data:pts.map(p=>({x:(p.t-winStart)/3600000,y:p.v})),
       borderColor:`rgba(232,236,238,${opacities[k]})`,
       backgroundColor:`rgba(232,236,238,${opacities[k]})`,
       borderWidth:k===0?2.5:1.5,
-      pointRadius:0,tension:0.3
+      pointRadius:0,tension:0.25
     });
   }
   if(!datasets.length){
@@ -640,7 +657,9 @@ function buildDayOverlayChart(days){
       interaction:{mode:'index',intersect:false},
       plugins:{legend:{display:true,position:'top',labels:{color:'#8B98A0',boxWidth:12,font:{size:11}}},
                tooltip:{callbacks:{label:(ctx)=>(ctx.dataset.label||'')+': '+ctx.parsed.y.toFixed(1)+'°C'}}},
-      scales:{x:{type:'linear',min:0,max:23,ticks:{color:'#8B98A0',stepSize:2,callback:(v)=>v+'h'},grid:{display:false}},
+      scales:{x:{type:'linear',min:0,max:days*24,
+                  ticks:{color:'#8B98A0',stepSize:days===1?4:24,
+                    callback:(v)=>days===1?(v+'h'):('J'+(v/24+1))}, grid:{display:false}},
               y:{ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}}}
   });
 }
@@ -992,12 +1011,14 @@ function buildDashboard(rows){
   const rangeDays={day:1,week:7,month:30,season:90,year:365};
   function render(range){
     const d=rangeDays[range];
+    syncedCharts=[];
     makeChart('tempChart',seriesFor('Temperature',d),'°C');
     makeChart('humChart',seriesFor('Humidity',d),'%');
     makeChart('co2Chart',seriesFor('CO2',d),' ppm');
     makeChart('noiseChart',seriesFor('Noise',d),' dB');
     if(charts['windChart'])charts['windChart'].destroy();
     charts['windChart']=buildWindChart(d);
+    syncedCharts=Object.values(charts);
     buildRiseFallChart(d);
     buildDayOverlayChart(d);
   }
