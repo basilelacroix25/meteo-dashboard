@@ -38,9 +38,7 @@ h2{font-family:'Fraunces',serif;font-weight:500;font-size:1.15rem;margin:2.5rem 
 .trend.down{color:#3E7CD6;}
 .minmax-italic{font-style:italic;font-size:11px;color:var(--text-muted);margin:-3px 0 4px;}
 .ext-card .wind-block{display:flex;align-items:center;gap:14px;margin-top:8px;border-top:1px solid var(--border);padding-top:10px;}
-.rose-combo{position:relative;width:96px;height:96px;flex-shrink:0;}
-.rose-combo canvas{position:absolute;top:0;left:0;}
-.rose-combo svg{position:absolute;top:0;left:0;pointer-events:none;}
+.rose-combo{width:96px;height:96px;flex-shrink:0;}
 .wind-text{font-size:12px;color:var(--text-muted);}
 .wind-text .dir{color:var(--text);font-weight:600;font-size:14px;display:block;margin-bottom:4px;}
 .wind-text b{color:var(--text);font-family:'JetBrains Mono',monospace;font-weight:500;}
@@ -88,7 +86,7 @@ footer{margin-top:3rem;color:var(--text-muted);font-size:12px;}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
 <script>
 const ROOM_COLOR={'Séjour':'#3E7CD6','Cuisine':'#3FAE56','Chambre':'#D64545'};
 const EXT_COLOR='#B8C0C6';
@@ -205,15 +203,62 @@ function metricRowNoAuto(metric,value){
   </div>`;
 }
 
-function arrowOverlaySVG(angle){
-  const a=angle||0;
-  const goingTo=(a+180)%360;
-  return `<svg width="96" height="96" viewBox="0 0 96 96">
-    <g transform="rotate(${goingTo} 48 48)">
-      <line x1="48" y1="76" x2="48" y2="30" stroke="#E8ECEE" stroke-width="2.5" stroke-linecap="round"/>
-      <polygon points="48,18 42,32 54,32" fill="#E8ECEE"/>
-    </g>
-  </svg>`;
+function polarPoint(cx,cy,r,angleDeg){
+  const rad=angleDeg*Math.PI/180;
+  return [cx+r*Math.sin(rad), cy-r*Math.cos(rad)];
+}
+function wedgePath(cx,cy,rInner,rOuter,a0,a1){
+  const [x1,y1]=polarPoint(cx,cy,rOuter,a0);
+  const [x2,y2]=polarPoint(cx,cy,rOuter,a1);
+  if(rInner<=0.5){
+    return `M${cx},${cy} L${x1},${y1} A${rOuter},${rOuter} 0 0 1 ${x2},${y2} Z`;
+  }
+  const [x3,y3]=polarPoint(cx,cy,rInner,a1);
+  const [x4,y4]=polarPoint(cx,cy,rInner,a0);
+  return `M${x4},${y4} L${x1},${y1} A${rOuter},${rOuter} 0 0 1 ${x2},${y2} L${x3},${y3} A${rInner},${rInner} 0 0 0 ${x4},${y4} Z`;
+}
+// Rose des vents dessinée à la main en SVG : chaque secteur est centré
+// exactement sur son point cardinal (secteur i va de angle_i - demi-pas à
+// angle_i + demi-pas), donc pas d'ambiguïté d'alignement possible.
+function buildRoseSVG(values,n,size,opts){
+  opts=opts||{};
+  const cx=size/2, cy=size/2;
+  const margin=opts.margin!==undefined?opts.margin:18;
+  const maxR=size/2-margin;
+  const vmax=Math.max(...values,0.001);
+  const step=360/n;
+  let bars='';
+  for(let i=0;i<n;i++){
+    const angle=i*step;
+    const a0=angle-step/2, a1=angle+step/2;
+    const r=Math.max(2,(values[i]/vmax)*maxR);
+    bars+=`<path d="${wedgePath(cx,cy,0,r,a0,a1)}" fill="rgba(184,192,198,0.55)" stroke="#E8ECEE" stroke-width="0.6"><title>${compassLabel(angle)} : ${values[i]} km/h</title></path>`;
+  }
+  let grids='';
+  if(opts.grid!==false){
+    [0.33,0.66,1].forEach(f=>{
+      grids+=`<circle cx="${cx}" cy="${cy}" r="${maxR*f}" fill="none" stroke="#262F35" stroke-width="1"/>`;
+    });
+  }
+  let labels='';
+  if(opts.labels!==false){
+    [['N',0],['E',90],['S',180],['O',270]].forEach(([txt,ang])=>{
+      const [lx,ly]=polarPoint(cx,cy,maxR+11,ang);
+      labels+=`<text x="${lx}" y="${ly+4}" fill="#B8C0C6" font-size="11" font-weight="600" text-anchor="middle">${txt}</text>`;
+    });
+  }
+  let arrow='';
+  if(opts.arrowAngle!==undefined&&opts.arrowAngle!==null){
+    const goingTo=(opts.arrowAngle+180)%360;
+    const [tx,ty]=polarPoint(cx,cy,maxR*0.92,goingTo);
+    const [bx,by]=polarPoint(cx,cy,maxR*0.35,goingTo+180);
+    arrow=`<line x1="${bx}" y1="${by}" x2="${tx}" y2="${ty}" stroke="#E8ECEE" stroke-width="2.5" stroke-linecap="round"/>`;
+    const tip=polarPoint(cx,cy,maxR*0.98,goingTo);
+    const wingL=polarPoint(cx,cy,maxR*0.78,goingTo-9);
+    const wingR=polarPoint(cx,cy,maxR*0.78,goingTo+9);
+    arrow+=`<polygon points="${tip[0]},${tip[1]} ${wingL[0]},${wingL[1]} ${wingR[0]},${wingR[1]}" fill="#E8ECEE"/>`;
+  }
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${grids}${bars}${arrow}${labels}</svg>`;
 }
 
 async function fetchJSON(url){
@@ -238,32 +283,6 @@ function computeWindBins(anglePts,speedPts,nDirs){
     if(best!==null){sums[idx]+=best;counts[idx]++;}
   });
   return sums.map((s,i)=>counts[i]?Math.round((s/counts[i])*10)/10:0);
-}
-// petite correction empirique : les barres de Chart.js polarArea paraissent
-// décalées de quelques degrés dans le sens horaire par rapport aux points
-// cardinaux ; on compense légèrement. À ajuster si besoin.
-const ROSE_START_ANGLE=-(360/16)/2;
-function renderRoseChart(canvasId,values,labels,opts){
-  opts=opts||{};
-  return new Chart(document.getElementById(canvasId),{
-    type:'polarArea',
-    data:{labels,datasets:[{data:values,backgroundColor:'rgba(184,192,198,0.5)',borderColor:'#E8ECEE',borderWidth:1}]},
-    options:{
-      responsive: opts.responsive!==false,
-      maintainAspectRatio:false,
-      startAngle:ROSE_START_ANGLE,
-      plugins:{
-        legend:{display:false},
-        tooltip:{enabled:opts.tooltip!==false,callbacks:{label:(ctx)=>ctx.label+' : '+ctx.formattedValue+' km/h'}}
-      },
-      scales:{r:{
-        ticks:{color:'#8B98A0',backdropColor:'transparent',font:{size:9},showLabelBackdrop:false},
-        grid:{color:'#262F35'},
-        angleLines:{color:'#262F35'},
-        pointLabels:{display:opts.pointLabels!==false,color:'#B8C0C6',font:{size:opts.labelSize||11,weight:'600'}}
-      }}
-    }
-  });
 }
 
 function renderCards(latest){
@@ -290,10 +309,7 @@ function renderCards(latest){
     ${ext.Humidity!==undefined?metricRowNoAuto('Humidity',ext.Humidity):''}
     ${pressureSource.Pressure!==undefined?metricRowNoAuto('Pressure',pressureSource.Pressure):''}
     <div class="wind-block">
-      <div class="rose-combo">
-        <canvas id="extDailyRose" width="96" height="96"></canvas>
-        ${arrowOverlaySVG(wind.WindAngle)}
-      </div>
+      <div class="rose-combo" id="extDailyRoseSlot"></div>
       <div class="wind-text">
         <span class="dir">${wind.WindAngle!==undefined?compassLabel(wind.WindAngle):'—'}</span>
         Moyenne : <b>${wind.WindStrength!==undefined?wind.WindStrength:'—'} km/h</b><br>
@@ -303,7 +319,7 @@ function renderCards(latest){
     </div>
   `;
   wrap.appendChild(extCard);
-  buildExtDailyRose();
+  buildExtDailyRose(wind.WindAngle);
 
   ['Séjour','Cuisine','Chambre'].forEach(room=>{
     const metrics=rooms[room];
@@ -316,15 +332,14 @@ function renderCards(latest){
   });
 }
 
-function buildExtDailyRose(){
+function buildExtDailyRose(currentAngle){
   const today=new Date().toISOString().slice(0,10);
   const anglePts=(byRoomMetric['Anémomètre|WindAngle']||[]).filter(p=>p.t.toISOString().slice(0,10)===today);
-  const canvas=document.getElementById('extDailyRose');
-  if(!canvas)return;
-  if(!anglePts.length)return;
+  const slot=document.getElementById('extDailyRoseSlot');
+  if(!slot)return;
   const speedPts=byRoomMetric['Anémomètre|WindStrength']||[];
-  const values=computeWindBins(anglePts,speedPts,16);
-  renderRoseChart('extDailyRose',values,COMPASS16,{responsive:false,pointLabels:false,tooltip:false});
+  const values=anglePts.length?computeWindBins(anglePts,speedPts,16):new Array(16).fill(0);
+  slot.innerHTML=buildRoseSVG(values,16,96,{grid:false,labels:true,arrowAngle:currentAngle,margin:20});
 }
 
 const WEATHER_ICON_CACHE={};
@@ -343,17 +358,62 @@ async function fetchWeatherIcons(days){
     return map;
   }catch(e){return {};}
 }
-function weatherEmoji(code){
-  if(code===undefined||code===null)return '';
-  if(code===0)return '☀';
-  if([1,2].includes(code))return '⛅';
-  if(code===3)return '☁';
-  if([45,48].includes(code))return '▤';
-  if([51,53,55,56,57].includes(code))return '☂';
-  if([61,63,65,66,67,80,81,82].includes(code))return '☔';
-  if([71,73,75,77,85,86].includes(code))return '❄';
-  if([95,96,99].includes(code))return '⚡';
-  return '';
+function weatherCategory(code){
+  if(code===undefined||code===null)return null;
+  if(code===0)return 'sun';
+  if([1,2].includes(code))return 'partly';
+  if(code===3)return 'cloud';
+  if([45,48].includes(code))return 'fog';
+  if([51,53,55,56,57,61,63,65,66,67,80,81,82].includes(code))return 'rain';
+  if([71,73,75,77,85,86].includes(code))return 'snow';
+  if([95,96,99].includes(code))return 'storm';
+  return null;
+}
+function drawWeatherIcon(ctx,category,cx,cy,s,color){
+  if(!category)return;
+  ctx.save();
+  ctx.strokeStyle=color; ctx.fillStyle=color; ctx.lineWidth=1.3; ctx.lineCap='round'; ctx.lineJoin='round';
+  function cloud(ox,oy,scale){
+    ctx.beginPath();
+    ctx.arc(ox-0.35*scale,oy,0.32*scale,Math.PI*0.5,Math.PI*1.6);
+    ctx.arc(ox+0.05*scale,oy-0.22*scale,0.28*scale,Math.PI*1.1,Math.PI*2.05);
+    ctx.arc(ox+0.42*scale,oy,0.30*scale,Math.PI*1.4,Math.PI*0.55);
+    ctx.closePath();
+    ctx.stroke();
+  }
+  if(category==='sun'){
+    ctx.beginPath(); ctx.arc(cx,cy,s*0.28,0,Math.PI*2); ctx.stroke();
+    for(let a=0;a<8;a++){
+      const ang=a*Math.PI/4;
+      ctx.beginPath();
+      ctx.moveTo(cx+Math.cos(ang)*s*0.42, cy+Math.sin(ang)*s*0.42);
+      ctx.lineTo(cx+Math.cos(ang)*s*0.56, cy+Math.sin(ang)*s*0.56);
+      ctx.stroke();
+    }
+  }else if(category==='partly'){
+    ctx.beginPath(); ctx.arc(cx-s*0.15,cy-s*0.18,s*0.2,0,Math.PI*2); ctx.stroke();
+    cloud(cx+s*0.05,cy+s*0.12,s*0.85);
+  }else if(category==='cloud'||category==='fog'){
+    cloud(cx,cy,s*0.95);
+    if(category==='fog'){
+      [0.2,0.34].forEach(o=>{ ctx.beginPath(); ctx.moveTo(cx-s*0.32,cy+s*o); ctx.lineTo(cx+s*0.32,cy+s*o); ctx.stroke(); });
+    }
+  }else if(category==='rain'){
+    cloud(cx,cy-s*0.08,s*0.85);
+    [-0.2,0,0.2].forEach(o=>{ ctx.beginPath(); ctx.moveTo(cx+o*s,cy+s*0.26); ctx.lineTo(cx+o*s-s*0.05,cy+s*0.42); ctx.stroke(); });
+  }else if(category==='snow'){
+    cloud(cx,cy-s*0.08,s*0.85);
+    [-0.2,0,0.2].forEach(o=>{ ctx.beginPath(); ctx.arc(cx+o*s,cy+s*0.34,s*0.035,0,Math.PI*2); ctx.fill(); });
+  }else if(category==='storm'){
+    cloud(cx,cy-s*0.1,s*0.85);
+    ctx.beginPath();
+    ctx.moveTo(cx+s*0.02,cy+s*0.18);
+    ctx.lineTo(cx-s*0.08,cy+s*0.36);
+    ctx.lineTo(cx+s*0.03,cy+s*0.36);
+    ctx.lineTo(cx-s*0.05,cy+s*0.54);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 async function buildDailyMinMaxChart(rows){
@@ -367,7 +427,7 @@ async function buildDailyMinMaxChart(rows){
   });
   const days=Object.keys(byDay).sort().slice(-7);
   if(!days.length)return;
-  const weekdays=['dim.','lun.','mar.','mer.','jeu.','ven.','sam.'];
+  const weekdays=['D','L','M','M','J','V','S'];
   const labels=days.map(k=>{
     const d=new Date(k+'T12:00:00Z');
     return weekdays[d.getUTCDay()]+' '+d.getUTCDate()+'/'+(d.getUTCMonth()+1);
@@ -395,8 +455,7 @@ async function buildDailyMinMaxChart(rows){
       meta.data.forEach((bar,i)=>{
         ctx.fillText(maxs[i].toFixed(1)+'°', bar.x, bar.y-8);
         ctx.fillText(mins[i].toFixed(1)+'°', bar.x, bar.base+16);
-        const emoji=weatherEmoji(icons[days[i]]);
-        if(emoji){ ctx.font='15px sans-serif'; ctx.fillStyle='#B8C0C6'; ctx.fillText(emoji, bar.x, chartArea.bottom+38); ctx.font='11px JetBrains Mono, monospace'; ctx.fillStyle='#E8ECEE'; }
+        drawWeatherIcon(ctx, weatherCategory(icons[days[i]]), bar.x, chartArea.bottom+42, 20, '#8B98A0');
       });
       ctx.restore();
     }
@@ -414,10 +473,10 @@ async function buildDailyMinMaxChart(rows){
     }]},
     options:{
       responsive:true, maintainAspectRatio:false,
-      layout:{padding:{top:26,bottom:52}},
+      layout:{padding:{top:26,bottom:56}},
       plugins:{legend:{display:false},tooltip:{callbacks:{label:(ctx)=>ctx.raw.map(v=>v.toFixed(1)+'°C').join(' – ')}}},
       scales:{
-        x:{ticks:{color:'#8B98A0'},grid:{display:false}},
+        x:{ticks:{color:'#8B98A0',maxRotation:0,minRotation:0,autoSkip:false},grid:{display:false}},
         y:{display:false}
       }
     },
@@ -435,9 +494,8 @@ function buildWindRose7d(){
   const main=document.getElementById('mainContent');
   main.insertAdjacentHTML('beforeend',`
     <h2>Rose des vents — moyenne 7 derniers jours</h2>
-    <div class="rosewrap"><canvas id="rose7d"></canvas></div>
+    <div class="rosewrap" style="display:flex;align-items:center;justify-content:center;">${buildRoseSVG(values,16,220,{grid:true,labels:true})}</div>
   `);
-  renderRoseChart('rose7d',values,COMPASS16,{labelSize:11});
 }
 
 function hourlyProfile(module,metric,days){
@@ -549,16 +607,21 @@ function buildDayOverlayChart(days){
   const canvasWrap=document.getElementById('dayOverlayCanvasWrap');
   const now=new Date();
   const opacities=[1,0.55,0.32,0.16];
-  const labels=['Aujourd\'hui','J-'+days,'J-'+(2*days),'J-'+(3*days)];
+  const unitNames={1:['Aujourd\'hui','Hier','Avant-hier','Il y a 3 jours'],7:['Cette semaine','Semaine précédente','Il y a 2 semaines','Il y a 3 semaines'],30:['Ce mois-ci','Mois précédent','Il y a 2 mois','Il y a 3 mois'],90:['Cette saison','Saison précédente','Il y a 2 saisons','Il y a 3 saisons'],365:['Cette année','Année précédente','Il y a 2 ans','Il y a 3 ans']};
+  const labels=unitNames[days]||['Période actuelle','Période -1','Période -2','Période -3'];
   const datasets=[];
   for(let k=0;k<4;k++){
-    const dayStart=new Date(now); dayStart.setHours(0,0,0,0); dayStart.setDate(dayStart.getDate()-k*days);
-    const dayEnd=new Date(dayStart); dayEnd.setDate(dayEnd.getDate()+1);
-    const pts=(byRoomMetric['Extérieur|Temperature']||[]).filter(p=>p.t>=dayStart&&p.t<dayEnd);
+    const winEnd=new Date(now.getTime()-k*days*86400000);
+    const winStart=new Date(now.getTime()-(k+1)*days*86400000);
+    const pts=(byRoomMetric['Extérieur|Temperature']||[]).filter(p=>p.t>=winStart&&p.t<winEnd);
     if(!pts.length)continue;
+    const buckets=Array.from({length:24},()=>[]);
+    pts.forEach(p=>buckets[p.t.getHours()].push(p.v));
+    const profile=buckets.map((arr,h)=>arr.length?{x:h,y:arr.reduce((a,b)=>a+b,0)/arr.length}:null).filter(v=>v!==null);
+    if(!profile.length)continue;
     datasets.push({
       label:labels[k],
-      data:pts.map(p=>({x:p.t.getHours()+p.t.getMinutes()/60,y:p.v})),
+      data:profile,
       borderColor:`rgba(232,236,238,${opacities[k]})`,
       backgroundColor:`rgba(232,236,238,${opacities[k]})`,
       borderWidth:k===0?2.5:1.5,
