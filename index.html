@@ -85,8 +85,6 @@ footer{margin-top:3rem;color:var(--text-muted);font-size:12px;}
 
 <div class="cards" id="liveCards"></div>
 
-<div id="aerationPanel"></div>
-
 <div id="mainContent"></div>
 
 <footer>Séjour = base station · Chambre = Home Coach · Cuisine = module intérieur additionnel · Extérieur &amp; Anémomètre = modules extérieurs. Données collectées toutes les 15 min via l'API Netatmo. Vent : direction affichée = d'où souffle le vent.</footer>
@@ -409,34 +407,21 @@ function detectRecentAeration(room){
   }
   return null;
 }
-function buildAerationPanel(rooms){
-  const wrap=document.getElementById('aerationPanel');
-  if(!wrap)return;
-  const ext=rooms['Extérieur']||{};
-  const roomsToShow=['Séjour','Cuisine','Chambre'].filter(r=>rooms[r]);
-  if(!roomsToShow.length){wrap.innerHTML='';return;}
+function aerationFooter(room,m,ext){
+  const level=aerationVerdict(m.CO2,m.Humidity);
   const levelInfo=[
     {cls:'green',icon:'🟢',label:'Pas nécessaire'},
     {cls:'orange',icon:'🟠',label:'Aérer conseillé'},
     {cls:'red',icon:'🔴',label:'Aérer maintenant'}
-  ];
-  const cardsHtml=roomsToShow.map(room=>{
-    const m=rooms[room];
-    const level=aerationVerdict(m.CO2,m.Humidity);
-    const info=levelInfo[level];
-    const tempDiff=(m.Temperature!==undefined&&ext.Temperature!==undefined)?(m.Temperature-ext.Temperature):null;
-    const aeration=detectRecentAeration(room);
-    return `<div class="aeration-card ${info.cls}">
-      <div class="aeration-title">${info.icon} ${room} — ${info.label}</div>
-      <div class="aeration-detail">
-        CO2 : ${m.CO2!==undefined?Math.round(m.CO2)+' ppm':'—'}<br>
-        Humidité : ${m.Humidity!==undefined?Math.round(m.Humidity)+' %':'—'}<br>
-        ${tempDiff!==null?`Écart avec l'extérieur : ${tempDiff>0?'+':''}${tempDiff.toFixed(1)}°C<br>`:''}
-      </div>
-      ${aeration?`<div class="aeration-detected">✅ Aération détectée : CO2 ${Math.round(aeration.from)} → ${Math.round(aeration.to)} ppm en ~${aeration.durationMin} min</div>`:''}
-    </div>`;
-  }).join('');
-  wrap.innerHTML=`<h2 style="margin-top:0;">🪟 Aération</h2><div class="aeration-wrap">${cardsHtml}</div>`;
+  ][level];
+  const tempDiff=(m.Temperature!==undefined&&ext.Temperature!==undefined)?(m.Temperature-ext.Temperature):null;
+  const aeration=detectRecentAeration(room);
+  return `<div class="metric-row" style="margin-top:4px;padding-top:8px;border-top:2px solid ${levelInfo.cls==='green'?'#3FAE56':levelInfo.cls==='orange'?'#E0B23D':'#D64545'};">
+      <span class="metric-label">${levelInfo.icon} Aération</span>
+      <span class="metric-value" style="font-size:12px;">${levelInfo.label}</span>
+    </div>
+    ${tempDiff!==null?`<p class="minmax-italic">écart extérieur ${tempDiff>0?'+':''}${tempDiff.toFixed(1)}°C</p>`:''}
+    ${aeration?`<p class="minmax-italic" style="color:#3FAE56;">✅ aération détectée (${Math.round(aeration.from)}→${Math.round(aeration.to)} ppm, ~${aeration.durationMin} min)</p>`:''}`;
 }
 
 function renderCards(latest){
@@ -445,7 +430,6 @@ function renderCards(latest){
   const wrap=document.getElementById('liveCards');
   wrap.innerHTML='';
   const rooms=latest.rooms||{};
-  buildAerationPanel(rooms);
 
   const ext=rooms['Extérieur']||{};
   const wind=rooms['Anémomètre']||{};
@@ -481,24 +465,22 @@ function renderCards(latest){
     const card=document.createElement('div');
     card.className='card';
     const rowsHtml=METRIC_ORDER.filter(m=>metrics[m]!==undefined).map(m=>metricRow(room,m,metrics[m],false,metrics.Humidity)).join('');
-    card.innerHTML=`<div class="room-title"><span class="dot" style="background:${ROOM_COLOR[room]}"></span>${room}</div>${rowsHtml}`;
+    card.innerHTML=`<div class="room-title"><span class="dot" style="background:${ROOM_COLOR[room]}"></span>${room}</div>${rowsHtml}${aerationFooter(room,metrics,ext)}`;
     wrap.appendChild(card);
   });
 }
 
-function compassGlowSVG(fromAngle,size,arrowAngle){
+function compassGlowSVG(counts,n,size,arrowAngle){
   const cx=size/2, cy=size/2;
   const rOuter=size/2-8, rInner=rOuter-10;
+  const step=360/n;
+  const maxC=Math.max(...counts,1);
   let glow='';
-  if(fromAngle!==undefined&&fromAngle!==null){
-    const spread=55, steps=11;
-    for(let i=0;i<steps;i++){
-      const off=(i/(steps-1)-0.5)*spread;
-      const a0=fromAngle+off-2.8, a1=fromAngle+off+2.8;
-      const dist=Math.abs(off)/(spread/2);
-      const opacity=Math.max(0,0.5*(1-dist*dist));
-      glow+=`<path d="${wedgePath(cx,cy,rInner,rOuter,a0,a1)}" fill="rgba(232,236,238,${opacity.toFixed(2)})"/>`;
-    }
+  for(let i=0;i<n;i++){
+    if(!counts[i])continue;
+    const opacity=Math.max(0.1,0.85*(counts[i]/maxC));
+    const a0=i*step-step/2, a1=i*step+step/2;
+    glow+=`<path d="${wedgePath(cx,cy,rInner,rOuter,a0,a1)}" fill="rgba(232,236,238,${opacity.toFixed(2)})"><title>${compassLabel(i*step)} : ${counts[i]} relevé(s) aujourd'hui</title></path>`;
   }
   const ring=`<circle cx="${cx}" cy="${cy}" r="${rOuter}" fill="none" stroke="#262F35" stroke-width="1.5"/>
               <circle cx="${cx}" cy="${cy}" r="${rInner}" fill="none" stroke="#262F35" stroke-width="1"/>`;
@@ -522,7 +504,16 @@ function compassGlowSVG(fromAngle,size,arrowAngle){
 function buildExtDailyRose(currentAngle){
   const slot=document.getElementById('extDailyRoseSlot');
   if(!slot)return;
-  slot.innerHTML=compassGlowSVG(currentAngle,96,currentAngle);
+  const today=new Date(); today.setHours(0,0,0,0);
+  const anglePts=(byRoomMetric['Anémomètre|WindAngle']||[]).filter(p=>p.t>=today);
+  const n=24, step=360/n;
+  const counts=new Array(n).fill(0);
+  anglePts.forEach(p=>{
+    const a=((p.v%360)+360)%360;
+    const idx=Math.round(a/step)%n;
+    counts[idx]++;
+  });
+  slot.innerHTML=compassGlowSVG(counts,n,96,currentAngle);
 }
 
 const WEATHER_ICON_CACHE={};
@@ -1434,8 +1425,8 @@ function buildTodayTimeline(){
     const pts=(byRoomMetric[room+'|CO2']||[]).filter(p=>p.t>=today).sort((a,b)=>a.t-b.t);
     let crossed1000=false, crossed1500=false;
     pts.forEach(p=>{
-      if(!crossed1000&&p.v>1000){events.push({t:p.t,icon:'🫁',text:`CO2 ${room} dépasse 1000 ppm`});crossed1000=true;}
-      if(!crossed1500&&p.v>1500){events.push({t:p.t,icon:'🫁',text:`CO2 ${room} dépasse 1500 ppm`});crossed1500=true;}
+      if(!crossed1000&&p.v>1000){events.push({t:p.t,icon:'▲',text:`CO2 ${room} dépasse 1000 ppm`});crossed1000=true;}
+      if(!crossed1500&&p.v>1500){events.push({t:p.t,icon:'▲',text:`CO2 ${room} dépasse 1500 ppm`});crossed1500=true;}
     });
     for(let i=0;i<pts.length;i++){
       let found=false;
@@ -1443,7 +1434,7 @@ function buildTodayTimeline(){
         const dtMin=(pts[j].t-pts[i].t)/60000;
         if(dtMin>60)break;
         if(pts[i].v-pts[j].v>=300){
-          events.push({t:pts[j].t,icon:'🪟',text:`Baisse rapide du CO2 ${room} (${Math.round(pts[i].v)}→${Math.round(pts[j].v)} ppm) → aération probable`});
+          events.push({t:pts[j].t,icon:'↻',text:`Baisse rapide du CO2 ${room} (${Math.round(pts[i].v)}→${Math.round(pts[j].v)} ppm) → aération probable`});
           i=j; found=true; break;
         }
       }
@@ -1452,22 +1443,28 @@ function buildTodayTimeline(){
   });
   const extPts=(byRoomMetric['Extérieur|Temperature']||[]).filter(p=>p.t>=today).sort((a,b)=>a.t-b.t);
   if(extPts.length){
-    events.push({t:extPts[0].t,icon:'🌡️',text:`Extérieur ${extPts[0].v.toFixed(1)}°C`});
+    events.push({t:extPts[0].t,icon:'○',text:`Extérieur ${extPts[0].v.toFixed(1)}°C`});
     let maxP=extPts[0],minP=extPts[0];
     extPts.forEach(p=>{if(p.v>maxP.v)maxP=p; if(p.v<minP.v)minP=p;});
-    events.push({t:maxP.t,icon:'☀️',text:`Pic extérieur ${maxP.v.toFixed(1)}°C`});
+    events.push({t:maxP.t,icon:'◉',text:`Pic extérieur ${maxP.v.toFixed(1)}°C`});
   }
   const gustPts=(byRoomMetric['Anémomètre|GustStrength']||[]).filter(p=>p.t>=today);
+  const angleForGust=byRoomMetric['Anémomètre|WindAngle']||[];
   if(gustPts.length){
     let maxG=gustPts[0];
     gustPts.forEach(p=>{if(p.v>maxG.v)maxG=p;});
-    if(maxG.v>15)events.push({t:maxG.t,icon:'🌬️',text:`Rafale ${maxG.v} km/h`});
+    if(maxG.v>15){
+      let bestA=null,bd=Infinity;
+      angleForGust.forEach(p=>{const d=Math.abs(p.t-maxG.t); if(d<bd){bd=d;bestA=p.v;}});
+      const dirTxt=bestA!==null?` (${compassLabel(bestA)})`:'';
+      events.push({t:maxG.t,icon:'≋',text:`Rafale ${maxG.v} km/h${dirTxt}`});
+    }
   }
   events.sort((a,b)=>a.t-b.t);
   const main=document.getElementById('mainContent');
   const html=events.length?events.map(e=>{
     const hh=e.t.getHours().toString().padStart(2,'0')+':'+e.t.getMinutes().toString().padStart(2,'0');
-    return `<div class="metric-row"><span class="metric-label">${hh} ${e.icon}</span><span class="metric-value" style="font-size:12px;">${e.text}</span></div>`;
+    return `<div class="metric-row"><span class="metric-label">${hh} <span style="color:#8B98A0;">${e.icon}</span></span><span class="metric-value" style="font-size:12px;">${e.text}</span></div>`;
   }).join(''):'<div class="empty">Rien de notable détecté aujourd\'hui pour l\'instant.</div>';
   main.insertAdjacentHTML('beforeend',`
     <div class="cal-section">
@@ -1529,30 +1526,48 @@ function buildNightScores(){
     main.insertAdjacentHTML('beforeend','<div class="cal-section"><h2>Score "Nuit"</h2><div class="empty">Pas assez de données Chambre pour calculer un score de nuit.</div></div>');
     return;
   }
-  const rowsHtml=nights.map(n=>{
+  main.insertAdjacentHTML('beforeend',`
+    <div class="cal-section">
+      <h2>Score "Nuit" — Chambre</h2>
+      <p class="hint">Fenêtre 23h-7h. Touche un point pour changer de nuit.</p>
+      <div class="card" id="nightCardBody" style="max-width:380px;"></div>
+      <div style="display:flex;align-items:center;justify-content:center;gap:12px;margin-top:10px;max-width:380px;">
+        <button id="nightPrev" style="background:var(--panel);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 10px;cursor:pointer;">‹</button>
+        <div id="nightDots" style="display:flex;gap:7px;"></div>
+        <button id="nightNext" style="background:var(--panel);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 10px;cursor:pointer;">›</button>
+      </div>
+    </div>
+  `);
+  let idx=0;
+  function fmt(v,dec,unit){return v!==null?v.toFixed(dec)+unit:'—';}
+  function coloredRow(label,val,metricKey,dec,unit){
+    const col=val!==null?pastilleColor(metricKey,val):null;
+    return `<div class="metric-row"><span class="metric-label">${label}</span><span class="metric-value" style="${col?'color:'+col+';':''}">${fmt(val,dec,unit)}</span></div>`;
+  }
+  function render(){
+    const n=nights[idx];
     const dateFmt=n.start.toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short'});
-    const fmt=(v,dec,unit)=>v!==null?v.toFixed(dec)+unit:'—';
-    return `<div class="card" style="margin-bottom:10px;border-left:3px solid ${nightScoreColor(n.score)};">
+    document.getElementById('nightCardBody').innerHTML=`
       <div class="room-title" style="justify-content:space-between;">
         <span>😴 ${dateFmt}</span>
         <span style="color:${nightScoreColor(n.score)};font-family:'JetBrains Mono',monospace;">${n.score}/100</span>
       </div>
-      <div class="metric-row"><span class="metric-label">🌡️ Température moyenne</span><span class="metric-value">${fmt(n.tempAvg,1,'°C')}</span></div>
-      <div class="metric-row"><span class="metric-label">💧 Humidité moyenne</span><span class="metric-value">${fmt(n.humAvg,0,'%')}</span></div>
-      <div class="metric-row"><span class="metric-label">🫁 CO2 moyen</span><span class="metric-value">${fmt(n.co2Avg,0,' ppm')}</span></div>
-      <div class="metric-row"><span class="metric-label">🫁 CO2 max</span><span class="metric-value">${fmt(n.co2Max,0,' ppm')}</span></div>
-      <div class="metric-row"><span class="metric-label">🔊 Bruit moyen</span><span class="metric-value">${fmt(n.noiseAvg,0,' dB')}</span></div>
-      <div class="metric-row"><span class="metric-label">🔊 Pic sonore</span><span class="metric-value">${fmt(n.noiseMax,0,' dB')}</span></div>
+      ${coloredRow('🌡️ Température moyenne',n.tempAvg,'Temperature',1,'°C')}
+      ${coloredRow('💧 Humidité moyenne',n.humAvg,'Humidity',0,'%')}
+      <div class="metric-row"><span class="metric-label">🫁 CO2 moyen / max</span><span class="metric-value" style="${n.co2Avg!==null?'color:'+pastilleColor('CO2',n.co2Avg)+';':''}">${fmt(n.co2Avg,0,'')} / ${fmt(n.co2Max,0,' ppm')}</span></div>
+      <div class="metric-row"><span class="metric-label">🔊 Bruit moyen / pic</span><span class="metric-value" style="${n.noiseAvg!==null?'color:'+pastilleColor('Noise',n.noiseAvg)+';':''}">${fmt(n.noiseAvg,0,'')} / ${fmt(n.noiseMax,0,' dB')}</span></div>
       <div class="metric-row"><span class="metric-label">⏱️ CO2 > 1000</span><span class="metric-value">${Math.floor(n.co2Above1000/60)}h${Math.round(n.co2Above1000%60).toString().padStart(2,'0')}</span></div>
-    </div>`;
-  }).join('');
-  main.insertAdjacentHTML('beforeend',`
-    <div class="cal-section">
-      <h2>Score "Nuit" — Chambre</h2>
-      <p class="hint">Fenêtre 23h-7h, 7 dernières nuits. Basé sur CO2, température, humidité et bruit.</p>
-      <div style="max-width:420px;">${rowsHtml}</div>
-    </div>
-  `);
+    `;
+    document.getElementById('nightDots').innerHTML=nights.map((nn,i)=>
+      `<span data-i="${i}" style="width:${i===idx?10:7}px;height:${i===idx?10:7}px;border-radius:50%;background:${nightScoreColor(nn.score)};cursor:pointer;display:inline-block;${i===idx?'outline:1px solid #E8ECEE;outline-offset:2px;':''}"></span>`
+    ).join('');
+    document.querySelectorAll('#nightDots span').forEach(el=>{
+      el.addEventListener('click',()=>{idx=parseInt(el.dataset.i,10);render();});
+    });
+  }
+  document.getElementById('nightPrev').addEventListener('click',()=>{idx=(idx-1+nights.length)%nights.length;render();});
+  document.getElementById('nightNext').addEventListener('click',()=>{idx=(idx+1)%nights.length;render();});
+  render();
 }
 
 function detectSolarGainHours(room){
@@ -1680,40 +1695,64 @@ function computeTimeInZone(room,metric,bucketSize,rangeStart,rangeEnd){
   }
   return buckets;
 }
+function tempZoneColor(bucketCenter){
+  const lo=10, mid=19.5, hi=30;
+  if(bucketCenter<=mid){
+    const t=Math.max(0,Math.min(1,(bucketCenter-lo)/(mid-lo)));
+    return mix3([62,124,214],[232,236,238],t);
+  }
+  const t=Math.max(0,Math.min(1,(bucketCenter-mid)/(hi-mid)));
+  return mix3([232,236,238],[214,69,69],t);
+}
 function buildTimeInZoneSection(){
-  const today=new Date(); today.setHours(0,0,0,0);
-  const tomorrow=new Date(today); tomorrow.setDate(tomorrow.getDate()+1);
   const main=document.getElementById('mainContent');
   const rooms=['Séjour','Cuisine','Chambre'];
-  let contentHtml='';
-  rooms.forEach(room=>{
-    const buckets=computeTimeInZone(room,'Temperature',1,today,tomorrow);
-    const keys=Object.keys(buckets).map(Number).sort((a,b)=>a-b);
-    if(!keys.length)return;
-    const maxMin=Math.max(...keys.map(k=>buckets[k]));
-    const rows=keys.map(k=>{
-      const mins=buckets[k];
-      const norm=maxMin?mins/maxMin:0;
-      const barW=Math.max(4,norm*180);
-      const h=Math.floor(mins/60), m=Math.round(mins%60);
-      return `<div style="display:flex;align-items:center;gap:8px;font-size:11px;margin-bottom:4px;">
-        <span style="width:56px;color:var(--text-muted);font-family:'JetBrains Mono',monospace;">${k}–${k+1}°C</span>
-        <span style="width:${barW}px;height:12px;background:#3E7CD6;border-radius:2px;"></span>
-        <span style="color:var(--text-muted);font-family:'JetBrains Mono',monospace;">${h}h${m.toString().padStart(2,'0')}</span>
-      </div>`;
-    }).join('');
-    contentHtml+=`<div class="card" style="margin-bottom:10px;"><div class="room-title">${room}</div>${rows}</div>`;
-  });
-  if(!contentHtml){
-    main.insertAdjacentHTML('beforeend','<div class="cal-section"><h2>🕯️ Temps passé par tranche de température</h2><div class="empty">Pas assez de données aujourd\'hui.</div></div>');
-    return;
-  }
   main.insertAdjacentHTML('beforeend',`
     <div class="cal-section">
-      <h2>🕯️ Temps passé par tranche de température — Aujourd'hui</h2>
-      <div style="max-width:420px;">${contentHtml}</div>
+      <h2>🕯️ Temps passé par tranche de température</h2>
+      <div class="tabs" id="zoneTabs">
+        <button data-r="day">Jour</button><button data-r="week">Semaine</button>
+        <button data-r="month">Mois</button><button data-r="season">Saison</button><button data-r="year">Année</button>
+      </div>
+      <p class="hint">Moyenne rapportée sur une journée.</p>
+      <div id="zoneRows" style="display:flex;gap:12px;flex-wrap:wrap;"></div>
     </div>
   `);
+  const rangeDaysMap={day:1,week:7,month:30,season:90,year:365};
+  function render(range){
+    const days=rangeDaysMap[range];
+    const end=new Date(); const start=new Date(end.getTime()-days*86400000);
+    const wrap=document.getElementById('zoneRows');
+    let html='';
+    rooms.forEach(room=>{
+      const buckets=computeTimeInZone(room,'Temperature',1,start,end);
+      const keys=Object.keys(buckets).map(Number).sort((a,b)=>a-b);
+      if(!keys.length)return;
+      const maxMinPerDay=Math.max(...keys.map(k=>buckets[k]/days));
+      const rows=keys.map(k=>{
+        const minsPerDay=buckets[k]/days;
+        const norm=maxMinPerDay?minsPerDay/maxMinPerDay:0;
+        const barW=Math.max(4,norm*120);
+        const h=Math.floor(minsPerDay/60), m=Math.round(minsPerDay%60);
+        return `<div style="display:flex;align-items:center;gap:6px;font-size:10px;margin-bottom:4px;">
+          <span style="width:50px;color:var(--text-muted);font-family:'JetBrains Mono',monospace;">${k}–${k+1}°C</span>
+          <span style="width:${barW}px;height:11px;background:${tempZoneColor(k+0.5)};border-radius:2px;"></span>
+          <span style="color:var(--text-muted);font-family:'JetBrains Mono',monospace;">${h}h${m.toString().padStart(2,'0')}</span>
+        </div>`;
+      }).join('');
+      html+=`<div class="card" style="flex:1;min-width:220px;"><div class="room-title">${room}</div>${rows}</div>`;
+    });
+    wrap.innerHTML=html||'<div class="empty">Pas assez de données sur cette période.</div>';
+  }
+  document.querySelectorAll('#zoneTabs button').forEach(b=>{
+    b.addEventListener('click',()=>{
+      document.querySelectorAll('#zoneTabs button').forEach(x=>x.classList.remove('active'));
+      b.classList.add('active');
+      render(b.dataset.r);
+    });
+  });
+  document.querySelector('#zoneTabs button[data-r="day"]').classList.add('active');
+  render('day');
 }
 
 function buildDashboard(rows){
