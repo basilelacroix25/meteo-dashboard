@@ -1427,6 +1427,295 @@ function buildTempCompareChart(rangeDays){
   });
 }
 
+function buildTodayTimeline(){
+  const today=new Date(); today.setHours(0,0,0,0);
+  const events=[];
+  ['Séjour','Chambre','Cuisine'].forEach(room=>{
+    const pts=(byRoomMetric[room+'|CO2']||[]).filter(p=>p.t>=today).sort((a,b)=>a.t-b.t);
+    let crossed1000=false, crossed1500=false;
+    pts.forEach(p=>{
+      if(!crossed1000&&p.v>1000){events.push({t:p.t,icon:'🫁',text:`CO2 ${room} dépasse 1000 ppm`});crossed1000=true;}
+      if(!crossed1500&&p.v>1500){events.push({t:p.t,icon:'🫁',text:`CO2 ${room} dépasse 1500 ppm`});crossed1500=true;}
+    });
+    for(let i=0;i<pts.length;i++){
+      let found=false;
+      for(let j=i+1;j<pts.length;j++){
+        const dtMin=(pts[j].t-pts[i].t)/60000;
+        if(dtMin>60)break;
+        if(pts[i].v-pts[j].v>=300){
+          events.push({t:pts[j].t,icon:'🪟',text:`Baisse rapide du CO2 ${room} (${Math.round(pts[i].v)}→${Math.round(pts[j].v)} ppm) → aération probable`});
+          i=j; found=true; break;
+        }
+      }
+      if(found)continue;
+    }
+  });
+  const extPts=(byRoomMetric['Extérieur|Temperature']||[]).filter(p=>p.t>=today).sort((a,b)=>a.t-b.t);
+  if(extPts.length){
+    events.push({t:extPts[0].t,icon:'🌡️',text:`Extérieur ${extPts[0].v.toFixed(1)}°C`});
+    let maxP=extPts[0],minP=extPts[0];
+    extPts.forEach(p=>{if(p.v>maxP.v)maxP=p; if(p.v<minP.v)minP=p;});
+    events.push({t:maxP.t,icon:'☀️',text:`Pic extérieur ${maxP.v.toFixed(1)}°C`});
+  }
+  const gustPts=(byRoomMetric['Anémomètre|GustStrength']||[]).filter(p=>p.t>=today);
+  if(gustPts.length){
+    let maxG=gustPts[0];
+    gustPts.forEach(p=>{if(p.v>maxG.v)maxG=p;});
+    if(maxG.v>15)events.push({t:maxG.t,icon:'🌬️',text:`Rafale ${maxG.v} km/h`});
+  }
+  events.sort((a,b)=>a.t-b.t);
+  const main=document.getElementById('mainContent');
+  const html=events.length?events.map(e=>{
+    const hh=e.t.getHours().toString().padStart(2,'0')+':'+e.t.getMinutes().toString().padStart(2,'0');
+    return `<div class="metric-row"><span class="metric-label">${hh} ${e.icon}</span><span class="metric-value" style="font-size:12px;">${e.text}</span></div>`;
+  }).join(''):'<div class="empty">Rien de notable détecté aujourd\'hui pour l\'instant.</div>';
+  main.insertAdjacentHTML('beforeend',`
+    <div class="cal-section">
+      <h2>Vue "Aujourd'hui"</h2>
+      <p class="hint">Chronologie des événements marquants de la journée.</p>
+      <div class="card" style="max-width:480px;">${html}</div>
+    </div>
+  `);
+}
+
+function nightWindow(daysAgo){
+  const end=new Date(); end.setHours(7,0,0,0); end.setDate(end.getDate()-daysAgo);
+  const start=new Date(end); start.setDate(start.getDate()-1); start.setHours(23,0,0,0);
+  return {start,end};
+}
+function estimateDurationAbove(pts,threshold){
+  const sorted=pts.slice().sort((a,b)=>a.t-b.t);
+  let totalMs=0;
+  for(let i=0;i<sorted.length-1;i++){
+    if(sorted[i].v>threshold){
+      totalMs+=Math.min(sorted[i+1].t-sorted[i].t,45*60000);
+    }
+  }
+  return totalMs/60000;
+}
+function nightScoreColor(score){
+  if(score>=80)return '#3FAE56';
+  if(score>=60)return '#E0B23D';
+  if(score>=40)return '#E8A33D';
+  return '#D64545';
+}
+function computeNightStats(daysAgo){
+  const {start,end}=nightWindow(daysAgo);
+  function seriesIn(metric){return (byRoomMetric['Chambre|'+metric]||[]).filter(p=>p.t>=start&&p.t<end);}
+  const temp=seriesIn('Temperature'), hum=seriesIn('Humidity'), co2=seriesIn('CO2'), noise=seriesIn('Noise');
+  if(!temp.length&&!co2.length&&!noise.length)return null;
+  const avg=arr=>arr.length?arr.reduce((a,p)=>a+p.v,0)/arr.length:null;
+  const max=arr=>arr.length?Math.max(...arr.map(p=>p.v)):null;
+  const tempAvg=avg(temp), humAvg=avg(hum), co2Avg=avg(co2), co2Max=max(co2), noiseAvg=avg(noise), noiseMax=max(noise);
+  const co2Above1000=estimateDurationAbove(co2,1000);
+  let score=100;
+  if(co2Avg!==null){ if(co2Avg>1500)score-=35; else if(co2Avg>1000)score-=20; else if(co2Avg>800)score-=8; }
+  if(co2Max!==null&&co2Max>1500)score-=10;
+  if(tempAvg!==null){ if(tempAvg<15||tempAvg>22)score-=15; else if(tempAvg<16||tempAvg>20)score-=6; }
+  if(humAvg!==null){ if(humAvg<30||humAvg>70)score-=15; else if(humAvg<40||humAvg>60)score-=6; }
+  if(noiseAvg!==null&&noiseAvg>38)score-=10;
+  if(noiseMax!==null&&noiseMax>55)score-=6;
+  score=Math.max(0,Math.min(100,Math.round(score)));
+  return {start,end,score,tempAvg,humAvg,co2Avg,co2Max,noiseAvg,noiseMax,co2Above1000};
+}
+function buildNightScores(){
+  const nights=[];
+  for(let k=0;k<7;k++){
+    const s=computeNightStats(k);
+    if(s)nights.push(s);
+  }
+  const main=document.getElementById('mainContent');
+  if(!nights.length){
+    main.insertAdjacentHTML('beforeend','<div class="cal-section"><h2>Score "Nuit"</h2><div class="empty">Pas assez de données Chambre pour calculer un score de nuit.</div></div>');
+    return;
+  }
+  const rowsHtml=nights.map(n=>{
+    const dateFmt=n.start.toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short'});
+    const fmt=(v,dec,unit)=>v!==null?v.toFixed(dec)+unit:'—';
+    return `<div class="card" style="margin-bottom:10px;border-left:3px solid ${nightScoreColor(n.score)};">
+      <div class="room-title" style="justify-content:space-between;">
+        <span>😴 ${dateFmt}</span>
+        <span style="color:${nightScoreColor(n.score)};font-family:'JetBrains Mono',monospace;">${n.score}/100</span>
+      </div>
+      <div class="metric-row"><span class="metric-label">🌡️ Température moyenne</span><span class="metric-value">${fmt(n.tempAvg,1,'°C')}</span></div>
+      <div class="metric-row"><span class="metric-label">💧 Humidité moyenne</span><span class="metric-value">${fmt(n.humAvg,0,'%')}</span></div>
+      <div class="metric-row"><span class="metric-label">🫁 CO2 moyen</span><span class="metric-value">${fmt(n.co2Avg,0,' ppm')}</span></div>
+      <div class="metric-row"><span class="metric-label">🫁 CO2 max</span><span class="metric-value">${fmt(n.co2Max,0,' ppm')}</span></div>
+      <div class="metric-row"><span class="metric-label">🔊 Bruit moyen</span><span class="metric-value">${fmt(n.noiseAvg,0,' dB')}</span></div>
+      <div class="metric-row"><span class="metric-label">🔊 Pic sonore</span><span class="metric-value">${fmt(n.noiseMax,0,' dB')}</span></div>
+      <div class="metric-row"><span class="metric-label">⏱️ CO2 > 1000</span><span class="metric-value">${Math.floor(n.co2Above1000/60)}h${Math.round(n.co2Above1000%60).toString().padStart(2,'0')}</span></div>
+    </div>`;
+  }).join('');
+  main.insertAdjacentHTML('beforeend',`
+    <div class="cal-section">
+      <h2>Score "Nuit" — Chambre</h2>
+      <p class="hint">Fenêtre 23h-7h, 7 dernières nuits. Basé sur CO2, température, humidité et bruit.</p>
+      <div style="max-width:420px;">${rowsHtml}</div>
+    </div>
+  `);
+}
+
+function detectSolarGainHours(room){
+  const tempPts=(byRoomMetric[room+'|Temperature']||[]).slice().sort((a,b)=>a.t-b.t);
+  const extPts=byRoomMetric['Extérieur|Temperature']||[];
+  const co2Pts=byRoomMetric[room+'|CO2']||[];
+  const humPts=byRoomMetric[room+'|Humidity']||[];
+  function nearestVal(pts,t){
+    let best=null,bd=Infinity;
+    pts.forEach(p=>{const d=Math.abs(p.t-t); if(d<bd){bd=d;best=p.v;}});
+    return bd<3600000?best:null;
+  }
+  const hourCounts=new Array(24).fill(0);
+  let total=0;
+  for(let i=0;i<tempPts.length-1;i++){
+    const dtH=(tempPts[i+1].t-tempPts[i].t)/3600000;
+    if(dtH<=0||dtH>2)continue;
+    const dTemp=tempPts[i+1].v-tempPts[i].v;
+    if(dTemp<0.8)continue;
+    const extA=nearestVal(extPts,tempPts[i].t), extB=nearestVal(extPts,tempPts[i+1].t);
+    if(extA===null||extB===null||Math.abs(extB-extA)>1.2)continue;
+    const co2A=nearestVal(co2Pts,tempPts[i].t), co2B=nearestVal(co2Pts,tempPts[i+1].t);
+    if(co2A!==null&&co2B!==null&&Math.abs(co2B-co2A)>60)continue;
+    const humA=nearestVal(humPts,tempPts[i].t), humB=nearestVal(humPts,tempPts[i+1].t);
+    if(humA!==null&&humB!==null&&Math.abs(humB-humA)>4)continue;
+    hourCounts[tempPts[i].t.getHours()]++;
+    total++;
+  }
+  return {hourCounts,total};
+}
+function buildSolarGainSection(){
+  const rooms=['Séjour','Cuisine','Chambre'];
+  const results=rooms.map(r=>({room:r,...detectSolarGainHours(r)})).filter(r=>r.total>=3);
+  const main=document.getElementById('mainContent');
+  if(!results.length){
+    main.insertAdjacentHTML('beforeend','<div class="cal-section"><h2>☀️ Apports solaires probables</h2><div class="empty">Pas assez d\'épisodes détectés pour dégager une tendance (montée de température sans hausse extérieure ni activité).</div></div>');
+    return;
+  }
+  const rowsHtml=results.map(r=>{
+    const maxCount=Math.max(...r.hourCounts);
+    const bars=r.hourCounts.map((c,h)=>{
+      const norm=maxCount?c/maxCount:0;
+      return `<div style="width:9px;flex-shrink:0;height:24px;display:flex;align-items:flex-end;" title="${h}h : ${c} épisode(s)"><div style="width:100%;height:${Math.max(2,norm*24)}px;background:${c?'#E8A33D':'#20272d'};border-radius:1px;"></div></div>`;
+    }).join('');
+    let peakH=0; r.hourCounts.forEach((c,h)=>{if(c>r.hourCounts[peakH])peakH=h;});
+    return `<div class="card" style="margin-bottom:10px;">
+      <div class="room-title">${r.room} <span style="font-weight:400;color:var(--text-muted);font-size:12px;">— surtout vers ${peakH}h (${r.total} épisodes au total)</span></div>
+      <div style="display:flex;gap:1px;">${bars}</div>
+    </div>`;
+  }).join('');
+  main.insertAdjacentHTML('beforeend',`
+    <div class="cal-section">
+      <h2>☀️ Apports solaires probables</h2>
+      <p class="hint">Détecté quand la température d'une pièce monte sans que l'extérieur, le CO2 ou l'humidité ne bougent significativement — signe d'un réchauffement par le soleil plutôt que par l'activité ou le chauffage.</p>
+      <div style="max-width:480px;">${rowsHtml}</div>
+    </div>
+  `);
+}
+
+const RECORD_METRICS=[
+  {module:'Extérieur',metric:'Temperature',label:'Temp. Extérieur max',agg:'max',unit:'°C'},
+  {module:'Extérieur',metric:'Temperature',label:'Temp. Extérieur min',agg:'min',unit:'°C'},
+  {module:'Séjour',metric:'Temperature',label:'Temp. Séjour max',agg:'max',unit:'°C'},
+  {module:'Séjour',metric:'Temperature',label:'Temp. Séjour min',agg:'min',unit:'°C'},
+  {module:'Anémomètre',metric:'GustStrength',label:'Rafale max',agg:'max',unit:' km/h'},
+  {module:'Séjour',metric:'Pressure',label:'Pression max',agg:'max',unit:' hPa'},
+  {module:'Séjour',metric:'Pressure',label:'Pression min',agg:'min',unit:' hPa'},
+  {module:'Chambre',metric:'Noise',label:'Bruit max (Chambre)',agg:'max',unit:' dB'},
+  {module:'Séjour',metric:'CO2',label:'CO2 max (Séjour)',agg:'max',unit:' ppm'},
+  {module:'Extérieur',metric:'Humidity',label:'Humidité ext. max',agg:'max',unit:'%'},
+  {module:'Extérieur',metric:'Humidity',label:'Humidité ext. min',agg:'min',unit:'%'}
+];
+function computeRecords(rows,year){
+  return RECORD_METRICS.map(rm=>{
+    const pts=rows.filter(r=>r.module===rm.module&&r.metric===rm.metric&&(year==='all'||new Date(r.timestamp_utc).getFullYear()===year));
+    if(!pts.length)return {...rm,value:null,date:null};
+    let best=pts[0];
+    pts.forEach(p=>{
+      if(rm.agg==='max'&&p.value>best.value)best=p;
+      if(rm.agg==='min'&&p.value<best.value)best=p;
+    });
+    return {...rm,value:best.value,date:new Date(best.timestamp_utc)};
+  });
+}
+function buildRecordsSection(rows){
+  const years=[...new Set(rows.map(r=>new Date(r.timestamp_utc).getFullYear()))].sort();
+  const main=document.getElementById('mainContent');
+  main.insertAdjacentHTML('beforeend',`
+    <div class="cal-section">
+      <h2>🏆 Records</h2>
+      <div class="tabs" id="recordsTabs">
+        <button data-y="all">Toutes années</button>
+        ${years.map(y=>`<button data-y="${y}">${y}</button>`).join('')}
+      </div>
+      <div id="recordsRows"></div>
+    </div>
+  `);
+  function render(year){
+    const records=computeRecords(rows,year);
+    const wrap=document.getElementById('recordsRows');
+    wrap.innerHTML=`<div class="card" style="max-width:480px;">${records.filter(r=>r.value!==null).map(r=>{
+      const dateFmt=r.date.toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'});
+      return `<div class="metric-row"><span class="metric-label">${r.label}</span><span class="metric-value">${r.value.toFixed(1)}${r.unit} <span style="color:var(--text-muted);font-size:10px;">(${dateFmt})</span></span></div>`;
+    }).join('')}</div>`;
+  }
+  document.querySelectorAll('#recordsTabs button').forEach(b=>{
+    b.addEventListener('click',()=>{
+      document.querySelectorAll('#recordsTabs button').forEach(x=>x.classList.remove('active'));
+      b.classList.add('active');
+      render(b.dataset.y==='all'?'all':parseInt(b.dataset.y,10));
+    });
+  });
+  document.querySelector('#recordsTabs button[data-y="all"]').classList.add('active');
+  render('all');
+}
+
+function computeTimeInZone(room,metric,bucketSize,rangeStart,rangeEnd){
+  const pts=(byRoomMetric[room+'|'+metric]||[]).filter(p=>p.t>=rangeStart&&p.t<rangeEnd).sort((a,b)=>a.t-b.t);
+  const buckets={};
+  for(let i=0;i<pts.length-1;i++){
+    const dt=(pts[i+1].t-pts[i].t)/60000;
+    if(dt<=0||dt>180)continue;
+    const b=Math.floor(pts[i].v/bucketSize)*bucketSize;
+    buckets[b]=(buckets[b]||0)+dt;
+  }
+  return buckets;
+}
+function buildTimeInZoneSection(){
+  const today=new Date(); today.setHours(0,0,0,0);
+  const tomorrow=new Date(today); tomorrow.setDate(tomorrow.getDate()+1);
+  const main=document.getElementById('mainContent');
+  const rooms=['Séjour','Cuisine','Chambre'];
+  let contentHtml='';
+  rooms.forEach(room=>{
+    const buckets=computeTimeInZone(room,'Temperature',1,today,tomorrow);
+    const keys=Object.keys(buckets).map(Number).sort((a,b)=>a-b);
+    if(!keys.length)return;
+    const maxMin=Math.max(...keys.map(k=>buckets[k]));
+    const rows=keys.map(k=>{
+      const mins=buckets[k];
+      const norm=maxMin?mins/maxMin:0;
+      const barW=Math.max(4,norm*180);
+      const h=Math.floor(mins/60), m=Math.round(mins%60);
+      return `<div style="display:flex;align-items:center;gap:8px;font-size:11px;margin-bottom:4px;">
+        <span style="width:56px;color:var(--text-muted);font-family:'JetBrains Mono',monospace;">${k}–${k+1}°C</span>
+        <span style="width:${barW}px;height:12px;background:#3E7CD6;border-radius:2px;"></span>
+        <span style="color:var(--text-muted);font-family:'JetBrains Mono',monospace;">${h}h${m.toString().padStart(2,'0')}</span>
+      </div>`;
+    }).join('');
+    contentHtml+=`<div class="card" style="margin-bottom:10px;"><div class="room-title">${room}</div>${rows}</div>`;
+  });
+  if(!contentHtml){
+    main.insertAdjacentHTML('beforeend','<div class="cal-section"><h2>🕯️ Temps passé par tranche de température</h2><div class="empty">Pas assez de données aujourd\'hui.</div></div>');
+    return;
+  }
+  main.insertAdjacentHTML('beforeend',`
+    <div class="cal-section">
+      <h2>🕯️ Temps passé par tranche de température — Aujourd'hui</h2>
+      <div style="max-width:420px;">${contentHtml}</div>
+    </div>
+  `);
+}
+
 function buildDashboard(rows){
   byRoomMetric={};
   rows.forEach(r=>{
@@ -1536,6 +1825,11 @@ function buildDashboard(rows){
   buildWindRose7d();
   buildWindImpactRoses();
   buildWeeklyProfileHeatmap(rows);
+  buildTodayTimeline();
+  buildNightScores();
+  buildSolarGainSection();
+  buildRecordsSection(rows);
+  buildTimeInZoneSection();
   buildCalendarSection(rows);
 }
 
