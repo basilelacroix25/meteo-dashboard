@@ -4,6 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Station météo — B3D</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0E1418">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Work+Sans:wght@400;500&display=swap" rel="stylesheet">
 <style>
@@ -50,7 +54,8 @@ h2{font-family:'Fraunces',serif;font-weight:500;font-size:1.15rem;margin:2.5rem 
 .chartbox.small{height:190px;}
 .axis-label{font-size:11px;color:var(--text-muted);margin:0 0 6px;flex:0 0 auto;}
 .canvas-fill{position:relative;flex:1;min-height:0;}
-.barwrap{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:1.5rem;height:270px;position:relative;}
+.canvas-fill canvas,.chartbox canvas{touch-action:none;}
+.barwrap{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:1.5rem;height:290px;position:relative;}
 .rosewrap{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:1.5rem;height:260px;position:relative;max-width:320px;}
 .cal-section{margin-top:2rem;}
 .cal-row{display:flex;align-items:center;gap:8px;margin-bottom:3px;}
@@ -237,7 +242,7 @@ function computeWindBins(anglePts,speedPts,nDirs){
 // petite correction empirique : les barres de Chart.js polarArea paraissent
 // décalées de quelques degrés dans le sens horaire par rapport aux points
 // cardinaux ; on compense légèrement. À ajuster si besoin.
-const ROSE_START_ANGLE=-6;
+const ROSE_START_ANGLE=-(360/16)/2;
 function renderRoseChart(canvasId,values,labels,opts){
   opts=opts||{};
   return new Chart(document.getElementById(canvasId),{
@@ -340,14 +345,14 @@ async function fetchWeatherIcons(days){
 }
 function weatherEmoji(code){
   if(code===undefined||code===null)return '';
-  if(code===0)return '☀️';
-  if([1,2].includes(code))return '🌤️';
-  if(code===3)return '☁️';
-  if([45,48].includes(code))return '🌫️';
-  if([51,53,55,56,57].includes(code))return '🌦️';
-  if([61,63,65,66,67,80,81,82].includes(code))return '🌧️';
-  if([71,73,75,77,85,86].includes(code))return '❄️';
-  if([95,96,99].includes(code))return '⛈️';
+  if(code===0)return '☀';
+  if([1,2].includes(code))return '⛅';
+  if(code===3)return '☁';
+  if([45,48].includes(code))return '▤';
+  if([51,53,55,56,57].includes(code))return '☂';
+  if([61,63,65,66,67,80,81,82].includes(code))return '☔';
+  if([71,73,75,77,85,86].includes(code))return '❄';
+  if([95,96,99].includes(code))return '⚡';
   return '';
 }
 
@@ -381,7 +386,7 @@ async function buildDailyMinMaxChart(rows){
   const minmaxLabels={
     id:'minmaxLabels',
     afterDatasetsDraw(chart){
-      const {ctx}=chart;
+      const {ctx,chartArea}=chart;
       const meta=chart.getDatasetMeta(0);
       ctx.save();
       ctx.font='11px JetBrains Mono, monospace';
@@ -391,7 +396,7 @@ async function buildDailyMinMaxChart(rows){
         ctx.fillText(maxs[i].toFixed(1)+'°', bar.x, bar.y-8);
         ctx.fillText(mins[i].toFixed(1)+'°', bar.x, bar.base+16);
         const emoji=weatherEmoji(icons[days[i]]);
-        if(emoji){ ctx.font='16px sans-serif'; ctx.fillText(emoji, bar.x, bar.base+38); ctx.font='11px JetBrains Mono, monospace'; }
+        if(emoji){ ctx.font='15px sans-serif'; ctx.fillStyle='#B8C0C6'; ctx.fillText(emoji, bar.x, chartArea.bottom+38); ctx.font='11px JetBrains Mono, monospace'; ctx.fillStyle='#E8ECEE'; }
       });
       ctx.restore();
     }
@@ -404,12 +409,12 @@ async function buildDailyMinMaxChart(rows){
       backgroundColor:'#F2F4F5',
       borderRadius:{topLeft:999,topRight:999,bottomLeft:999,bottomRight:999},
       borderSkipped:false,
-      barPercentage:0.55,
+      barPercentage:0.72,
       categoryPercentage:0.9
     }]},
     options:{
       responsive:true, maintainAspectRatio:false,
-      layout:{padding:{top:26,bottom:42}},
+      layout:{padding:{top:26,bottom:52}},
       plugins:{legend:{display:false},tooltip:{callbacks:{label:(ctx)=>ctx.raw.map(v=>v.toFixed(1)+'°C').join(' – ')}}},
       scales:{
         x:{ticks:{color:'#8B98A0'},grid:{display:false}},
@@ -764,13 +769,21 @@ function buildCalendarSection(rows){
       windAvg: windSpeed[k]?(windSpeed[k].reduce((a,b)=>a+b,0)/windSpeed[k].length):null
     };
   });
-  const sortedDays=[...allDays].sort();
+  const sortedKnown=[...allDays].sort();
+  const firstDate=new Date(sortedKnown[0]+'T00:00:00Z');
+  const lastDate=new Date();
+  lastDate.setUTCHours(0,0,0,0);
+
+  // liste continue de tous les jours entre la première mesure et aujourd'hui
+  const allSortedDays=[];
   const byMonth={};
-  sortedDays.forEach(k=>{
+  for(let d=new Date(firstDate); d<=lastDate; d.setUTCDate(d.getUTCDate()+1)){
+    const k=d.toISOString().slice(0,10);
+    allSortedDays.push(k);
     const mk=k.slice(0,7);
     if(!byMonth[mk])byMonth[mk]=[];
     byMonth[mk].push(k);
-  });
+  }
   const monthKeys=Object.keys(byMonth).sort();
   const monthNames=['jan.','fév.','mar.','avr.','mai','juin','juil.','août','sep.','oct.','nov.','déc.'];
 
@@ -781,6 +794,7 @@ function buildCalendarSection(rows){
       <div class="tabs" id="calTabs">
         ${Object.entries(CAL_METRICS).map(([k,v])=>`<button data-m="${k}">${v.label}</button>`).join('')}
       </div>
+      <p class="insight-caption" id="calSelected">Touche une case pour voir sa valeur.</p>
       <div id="calRows"></div>
       <div class="scale"><span id="calScaleLo">—</span><div class="grad" id="calGrad"></div><span id="calScaleHi">—</span></div>
     </div>
@@ -788,12 +802,13 @@ function buildCalendarSection(rows){
 
   function render(metricKey){
     const cfg=CAL_METRICS[metricKey];
-    const vals=sortedDays.map(k=>dayStats[k][metricKey]).filter(v=>v!==null&&v!==undefined);
+    const vals=allSortedDays.map(k=>dayStats[k]&&dayStats[k][metricKey]).filter(v=>v!==null&&v!==undefined);
     if(!vals.length)return;
     const vmin=Math.min(...vals), vmax=Math.max(...vals);
     document.getElementById('calScaleLo').textContent=vmin.toFixed(1);
     document.getElementById('calScaleHi').textContent=vmax.toFixed(1);
     document.getElementById('calGrad').style.background=`linear-gradient(to right,#${cfg.ramp[0]},${mix(cfg.ramp[0],cfg.ramp[1],1)})`;
+    document.getElementById('calSelected').textContent='Touche une case pour voir sa valeur.';
     const rowsWrap=document.getElementById('calRows');
     rowsWrap.innerHTML='';
     monthKeys.forEach(mk=>{
@@ -807,13 +822,18 @@ function buildCalendarSection(rows){
       const daysWrap=document.createElement('div');
       daysWrap.className='days';
       byMonth[mk].forEach(k=>{
-        const v=dayStats[k][metricKey];
+        const v=dayStats[k]?dayStats[k][metricKey]:null;
         const cell=document.createElement('div');
         cell.className='cal-day';
         if(v!==null&&v!==undefined){
           const norm=vmax>vmin?(v-vmin)/(vmax-vmin):0.5;
           cell.style.background=mix(cfg.ramp[0],cfg.ramp[1],norm);
-          cell.title=k+' : '+v.toFixed(1);
+          cell.style.cursor='pointer';
+          cell.addEventListener('click',()=>{
+            const unit=metricKey==='windAvg'?'km/h':'°C';
+            const dateFmt=new Date(k+'T12:00:00Z').toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short',year:'numeric'});
+            document.getElementById('calSelected').innerHTML=`<b>${dateFmt}</b> — ${cfg.label} : <b>${v.toFixed(1)}${unit}</b>`;
+          });
         }
         daysWrap.appendChild(cell);
       });
