@@ -305,6 +305,47 @@ function computeWindBins(anglePts,speedPts,nDirs){
   return sums.map((s,i)=>counts[i]?Math.round((s/counts[i])*10)/10:0);
 }
 
+function pressureTrend(){
+  const pts=(byRoomMetric['Séjour|Pressure']||[]).filter(p=>p.t>=new Date(Date.now()-3*3600000)).sort((a,b)=>a.t-b.t);
+  if(pts.length<2)return null;
+  const dtH=(pts[pts.length-1].t-pts[0].t)/3600000;
+  if(dtH<=0)return null;
+  return (pts[pts.length-1].v-pts[0].v)/dtH;
+}
+function pressureBadge(rate){
+  if(rate===null)return {text:'Tendance inconnue',color:'#8B98A0'};
+  if(rate<=-1)return {text:'Chute rapide — coup de vent possible',color:'#D64545'};
+  if(rate<=-0.3)return {text:'En baisse',color:'#E8A33D'};
+  if(rate>=1)return {text:'Remontée rapide',color:'#3E7CD6'};
+  if(rate>=0.3)return {text:'En hausse',color:'#3E7CD6'};
+  return {text:'Stable',color:'#8B98A0'};
+}
+function pressureColor(rate){
+  if(rate<=-1)return '#D64545';
+  if(rate>=1)return '#3E7CD6';
+  if(Math.abs(rate)<0.3)return '#8B98A0';
+  return '#E8A33D';
+}
+
+function dewPoint(tempC,rh){
+  if(tempC===undefined||rh===undefined||tempC===null||rh===null)return null;
+  const a=17.27,b=237.7;
+  const alpha=((a*tempC)/(b+tempC))+Math.log(rh/100);
+  return (b*alpha)/(a-alpha);
+}
+function dewPointRow(temp,hum){
+  const dp=dewPoint(temp,hum);
+  if(dp===null)return '';
+  const gap=temp-dp;
+  let color='#3fae56';
+  if(gap<2)color='#d64545'; else if(gap<4)color='#e0b23d';
+  return `<div class="metric-row">
+    <span class="metric-label">Point de rosée</span>
+    <span class="metric-value">${dp.toFixed(1)}°C</span>
+    <span class="pastille" style="background:${color}"></span>
+  </div>`;
+}
+
 function renderCards(latest){
   const upd=new Date(latest.updated_utc);
   document.getElementById('lastUpdate').textContent='Dernière mise à jour : '+upd.toLocaleString('fr-FR');
@@ -327,7 +368,9 @@ function renderCards(latest){
     ${ext.Temperature!==undefined?metricRowNoAuto('Temperature',ext.Temperature):''}
     ${minMaxLine}
     ${ext.Humidity!==undefined?metricRowNoAuto('Humidity',ext.Humidity):''}
+    ${dewPointRow(ext.Temperature,ext.Humidity)}
     ${pressureSource.Pressure!==undefined?metricRowNoAuto('Pressure',pressureSource.Pressure):''}
+    ${pressureSource.Pressure!==undefined?(()=>{const rate=pressureTrend();const b=pressureBadge(rate);return `<p class="minmax-italic" style="font-style:normal;"><span class="dot" style="background:${b.color};width:7px;height:7px;"></span> ${b.text}${rate!==null?' ('+(rate>0?'+':'')+rate.toFixed(1)+' hPa/h)':''}</p>`;})():''}
     <div class="wind-block">
       <div class="rose-combo" id="extDailyRoseSlot"></div>
       <div class="wind-text">
@@ -346,7 +389,10 @@ function renderCards(latest){
     if(!metrics)return;
     const card=document.createElement('div');
     card.className='card';
-    const rowsHtml=METRIC_ORDER.filter(m=>metrics[m]!==undefined).map(m=>metricRow(room,m,metrics[m])).join('');
+    const rowsHtml=METRIC_ORDER.filter(m=>metrics[m]!==undefined).map(m=>{
+      const row=metricRow(room,m,metrics[m]);
+      return m==='Humidity'?row+dewPointRow(metrics.Temperature,metrics.Humidity):row;
+    }).join('');
     card.innerHTML=`<div class="room-title"><span class="dot" style="background:${ROOM_COLOR[room]}"></span>${room}</div>${rowsHtml}`;
     wrap.appendChild(card);
   });
@@ -763,6 +809,38 @@ function aggregateDaily(pts,mode){
   });
 }
 
+function buildPressureChart(rangeDays){
+  const cutoff=new Date(Date.now()-rangeDays*86400000);
+  const rooms=['Séjour','Chambre'];
+  const dashes={'Séjour':[],'Chambre':[6,4]};
+  const datasets=rooms.map(room=>{
+    const pts=(byRoomMetric[room+'|Pressure']||[]).filter(p=>p.t>=cutoff).sort((a,b)=>a.t-b.t);
+    return {
+      label:room,
+      data:pts.map(p=>({x:p.t,y:p.v})),
+      borderWidth:2,pointRadius:0,tension:0.2,
+      borderDash:dashes[room],
+      segment:{borderColor:ctx=>{
+        const dtH=(ctx.p1.parsed.x-ctx.p0.parsed.x)/3600000;
+        const rate=dtH>0?(ctx.p1.parsed.y-ctx.p0.parsed.y)/dtH:0;
+        return pressureColor(rate);
+      }},
+      borderColor:'#8B98A0'
+    };
+  }).filter(s=>s.data.length>0);
+  return new Chart(document.getElementById('pressureChart'),{
+    type:'line',
+    data:{datasets},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      interaction:{mode:'index',intersect:false},
+      plugins:{legend:{display:false},zoom:ZOOM_OPTS,tooltip:{callbacks:{label:(ctx)=>(ctx.dataset.label||'')+': '+ctx.parsed.y.toFixed(1)+' hPa'}}},
+      scales:{x:{type:'time',ticks:{color:'#8B98A0'},grid:{color:'#262F35'}},
+              y:{ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}}
+    }
+  });
+}
+
 function buildWindChart(rangeDays){
   const cutoff=new Date(Date.now()-rangeDays*86400000);
   let avgPts=(byRoomMetric['Anémomètre|WindStrength']||[]).filter(p=>p.t>=cutoff);
@@ -831,6 +909,73 @@ const CAL_METRICS={
   sejMin:{label:'Séjour min',ramp:['1B2329','3E7CD6']},
   windAvg:{label:'Vent moyen',ramp:['1B2329','8B98A0']}
 };
+function pearson(xs,ys){
+  const n=xs.length;
+  if(n<3)return null;
+  const mx=xs.reduce((a,b)=>a+b,0)/n, my=ys.reduce((a,b)=>a+b,0)/n;
+  let num=0,dx2=0,dy2=0;
+  for(let i=0;i<n;i++){const dx=xs[i]-mx,dy=ys[i]-my;num+=dx*dy;dx2+=dx*dx;dy2+=dy*dy;}
+  const den=Math.sqrt(dx2*dy2);
+  return den?num/den:null;
+}
+function corrColor(r){
+  if(r===null)return '#20272d';
+  const t=(r+1)/2;
+  const neg=[62,124,214], mid=[27,35,41], pos=[214,69,69];
+  if(t<0.5)return mix3(neg,mid,t/0.5);
+  return mix3(mid,pos,(t-0.5)/0.5);
+}
+const CORR_METRICS=[
+  {module:'Extérieur',metric:'Temperature',label:'Temp. Ext'},
+  {module:'Séjour',metric:'Temperature',label:'Temp. Séjour'},
+  {module:'Séjour',metric:'Humidity',label:'Hum. Séjour'},
+  {module:'Séjour',metric:'CO2',label:'CO2 Séjour'},
+  {module:'Séjour',metric:'Pressure',label:'Pression'},
+  {module:'Séjour',metric:'Noise',label:'Bruit'},
+  {module:'Anémomètre',metric:'WindStrength',label:'Vent'}
+];
+function dailyAvgSeries(rows,module,metric){
+  const byDay={};
+  rows.forEach(r=>{
+    if(r.module===module&&r.metric===metric){
+      const k=new Date(r.timestamp_utc).toISOString().slice(0,10);
+      (byDay[k]=byDay[k]||[]).push(r.value);
+    }
+  });
+  const out={};
+  Object.entries(byDay).forEach(([k,vals])=>{out[k]=vals.reduce((a,b)=>a+b,0)/vals.length;});
+  return out;
+}
+function buildCorrelationMatrix(rows){
+  const series=CORR_METRICS.map(m=>dailyAvgSeries(rows,m.module,m.metric));
+  const n=CORR_METRICS.length;
+  const matrix=[];
+  for(let i=0;i<n;i++){
+    matrix.push([]);
+    for(let j=0;j<n;j++){
+      if(i===j){matrix[i].push(1);continue;}
+      const commonDays=Object.keys(series[i]).filter(d=>series[j][d]!==undefined);
+      const xs=commonDays.map(d=>series[i][d]), ys=commonDays.map(d=>series[j][d]);
+      matrix[i].push(pearson(xs,ys));
+    }
+  }
+  const main=document.getElementById('mainContent');
+  const cellsHtml=matrix.map((row,i)=>`<tr><td style="padding:4px 6px;font-size:10px;color:var(--text-muted);white-space:nowrap;font-family:'JetBrains Mono',monospace;">${CORR_METRICS[i].label}</td>${
+    row.map((r,j)=>`<td title="${CORR_METRICS[i].label} / ${CORR_METRICS[j].label}" style="width:44px;height:36px;text-align:center;font-size:10px;font-family:'JetBrains Mono',monospace;background:${corrColor(r)};color:${r===null?'#8B98A0':'#fff'};">${r===null?'—':r.toFixed(2)}</td>`).join('')
+  }</tr>`).join('');
+  const headerHtml=`<tr><td></td>${CORR_METRICS.map(m=>`<td style="font-size:10px;color:var(--text-muted);text-align:center;padding:4px 2px;writing-mode:vertical-rl;transform:rotate(180deg);font-family:'JetBrains Mono',monospace;">${m.label}</td>`).join('')}</tr>`;
+  main.insertAdjacentHTML('beforeend',`
+    <div class="cal-section">
+      <h2>Corrélations (moyennes journalières)</h2>
+      <p class="hint">Coefficient de Pearson entre -1 (inversement liés) et +1 (varient ensemble). Calculé sur tous les jours où les deux mesures existent.</p>
+      <div style="overflow-x:auto;">
+        <table style="border-collapse:collapse;">${headerHtml}${cellsHtml}</table>
+      </div>
+      <div class="scale"><span>-1</span><div class="grad" style="background:linear-gradient(to right,#3E7CD6,#1B2329,#D64545)"></div><span>+1</span></div>
+    </div>
+  `);
+}
+
 function buildCalendarSection(rows){
   const extTemp={}, sejTemp={}, windSpeed={};
   rows.forEach(r=>{
@@ -959,6 +1104,9 @@ function buildDashboard(rows){
     <div class="chartbox">${chartWrap('humChart','%')}</div>
     <h2>CO2</h2>
     <div class="chartbox">${chartWrap('co2Chart','ppm')}</div>
+    <h2>Pression — Séjour &amp; Chambre</h2>
+    <div class="legend"><span><span class="dot" style="background:#8B98A0"></span>Stable</span><span><span class="dot" style="background:#E8A33D"></span>Évolution modérée</span><span><span class="dot" style="background:#D64545"></span>Chute rapide</span><span><span class="dot" style="background:#3E7CD6"></span>Remontée rapide</span></div>
+    <div class="chartbox">${chartWrap('pressureChart','hPa')}</div>
     <h2>Bruit — Séjour &amp; Chambre</h2>
     <div class="chartbox">${chartWrap('noiseChart','dB')}</div>
     <h2>Vent</h2>
@@ -1016,6 +1164,8 @@ function buildDashboard(rows){
     makeChart('humChart',seriesFor('Humidity',d),'%');
     makeChart('co2Chart',seriesFor('CO2',d),' ppm');
     makeChart('noiseChart',seriesFor('Noise',d),' dB');
+    if(charts['pressureChart'])charts['pressureChart'].destroy();
+    charts['pressureChart']=buildPressureChart(d);
     if(charts['windChart'])charts['windChart'].destroy();
     charts['windChart']=buildWindChart(d);
     syncedCharts=Object.values(charts);
@@ -1034,6 +1184,7 @@ function buildDashboard(rows){
   buildDailyMinMaxChart(rows);
   buildWindRose7d();
   buildCalendarSection(rows);
+  buildCorrelationMatrix(rows);
 }
 
 async function init(){
