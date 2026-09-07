@@ -647,8 +647,8 @@ function buildWindImpactRoses(){
   const events=detectWindOnsets(2);
   const slot=document.getElementById('windRoseSlot');
   if(!slot)return;
-  if(events.length<8){
-    slot.insertAdjacentHTML('beforeend','<p class="hint">Pas encore assez de coups de vent détectés (montée rapide au-delà de 15 km/h) pour dégager une tendance direction → météo. Ça s\'affinera avec plus de données.</p>');
+  if(!events.length){
+    slot.insertAdjacentHTML('beforeend','<p class="hint">Aucun coup de vent détecté (montée rapide au-delà de 15 km/h) sur l\'historique actuel.</p>');
     return;
   }
   const n=16, step=360/n;
@@ -662,7 +662,7 @@ function buildWindImpactRoses(){
   const tempVals=tempSums.map((s,i)=>tempCounts[i]?s/tempCounts[i]:null);
   const humVals=humSums.map((s,i)=>humCounts[i]?s/humCounts[i]:null);
   slot.insertAdjacentHTML('beforeend',`
-    <p class="hint">Ce que le vent amène : écart de température/humidité extérieure, 2h après le début d'un coup de vent (>15 km/h), selon la direction d'où il souffle. Basé sur ${events.length} épisodes détectés. Rouge = ça monte, bleu = ça descend.</p>
+    <p class="hint">Ce que le vent amène : écart de température/humidité extérieure, 2h après le début d'un coup de vent (>15 km/h), selon la direction d'où il souffle. Basé sur ${events.length} épisode${events.length>1?'s':''} détecté${events.length>1?'s':''}${events.length<8?' — échantillon encore faible, à prendre avec prudence':''}. Rouge = ça monte, bleu = ça descend.</p>
     <div style="display:flex;gap:16px;flex-wrap:wrap;">
       <div>
         <p class="insight-caption" id="roseCaptionTemp">Vent → Température. Touche un secteur.</p>
@@ -785,7 +785,16 @@ function buildRiseFallChart(days){
 
   new Chart(document.getElementById('riseFallChart'),{
     type:'line',
-    data:{datasets:[{data:profile.map((v,h)=>({x:h,y:v})),borderColor:'#B8C0C6',backgroundColor:'rgba(184,192,198,0.1)',fill:true,spanGaps:true,tension:0.35,pointRadius:0}]},
+    data:{datasets:[{data:profile.map((v,h)=>({x:h,y:v})),borderColor:'#B8C0C6',
+      backgroundColor:(context)=>{
+        const {ctx,chartArea}=context.chart;
+        if(!chartArea)return 'rgba(184,192,198,0.12)';
+        const g=ctx.createLinearGradient(0,chartArea.top,0,chartArea.bottom);
+        g.addColorStop(0,'rgba(184,192,198,0.28)');
+        g.addColorStop(1,'rgba(184,192,198,0)');
+        return g;
+      },
+      fill:true,spanGaps:true,tension:0.35,pointRadius:0}]},
     options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:36}},
       plugins:{legend:{display:false},tooltip:{callbacks:{label:(ctx)=>ctx.parsed.y.toFixed(1)+'°C'}}},
       scales:{x:{type:'linear',min:0,max:23,ticks:{color:'#8B98A0',stepSize:2,callback:(v)=>v+'h'},grid:{display:false}},
@@ -935,7 +944,7 @@ function buildWindChart(rangeDays){
         ctx.save();
         ctx.translate(x,y);
         ctx.rotate(goingTo*Math.PI/180);
-        ctx.fillStyle='#8B98A0';
+        ctx.fillStyle=windIntensityColor(Math.max(avgV||0,gustV||0));
         ctx.beginPath();
         ctx.moveTo(0,-5); ctx.lineTo(-3,3); ctx.lineTo(3,3); ctx.closePath(); ctx.fill();
         ctx.restore();
