@@ -25,7 +25,7 @@ h1{font-family:'Fraunces',serif;font-weight:500;font-size:2rem;margin:0 0 4px;}
 h2{font-family:'Fraunces',serif;font-weight:500;font-size:1.15rem;margin:2.5rem 0 1rem;}
 .hint{font-size:12px;color:var(--text-muted);margin:-8px 0 12px;}
 .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:1rem;}
-.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px;}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px;display:flex;flex-direction:column;}
 .room-title{font-size:14px;color:var(--text);margin-bottom:10px;display:flex;align-items:center;gap:7px;font-weight:500;}
 .dot{width:10px;height:10px;border-radius:50%;display:inline-block;flex-shrink:0;}
 .metric-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 0;border-top:1px solid var(--border);font-size:13px;}
@@ -55,15 +55,11 @@ h2{font-family:'Fraunces',serif;font-weight:500;font-size:1.15rem;margin:2.5rem 
 .canvas-fill canvas,.chartbox canvas{touch-action:none;}
 .barwrap{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:1.5rem;height:290px;position:relative;}
 .rosewrap{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:1.5rem;height:260px;position:relative;max-width:320px;}
+.timeline-row{display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-top:1px solid var(--border);font-size:12px;}
+.timeline-row:first-child{border-top:none;}
+.timeline-time{width:78px;flex-shrink:0;color:var(--text-muted);font-family:'JetBrains Mono',monospace;}
+.timeline-text{flex:1;text-align:left;}
 .cal-section{margin-top:2rem;}
-.aeration-wrap{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:1.5rem;}
-.aeration-card{border-radius:10px;padding:14px;border:1px solid var(--border);}
-.aeration-card.green{background:rgba(63,174,86,0.10);border-color:rgba(63,174,86,0.4);}
-.aeration-card.orange{background:rgba(224,178,61,0.10);border-color:rgba(224,178,61,0.4);}
-.aeration-card.red{background:rgba(214,69,69,0.10);border-color:rgba(214,69,69,0.4);}
-.aeration-title{font-size:13px;font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:6px;}
-.aeration-detail{font-size:11px;color:var(--text-muted);line-height:1.6;}
-.aeration-detected{font-size:11px;color:#3FAE56;margin-top:6px;}
 .cal-row{display:flex;align-items:center;gap:8px;margin-bottom:3px;}
 .cal-row .month-label{width:74px;font-size:11px;color:var(--text-muted);flex-shrink:0;font-family:'JetBrains Mono',monospace;}
 .cal-row .days{display:flex;gap:2px;flex:1;flex-wrap:nowrap;}
@@ -365,12 +361,12 @@ function pressureTrend(){
   return (pts[pts.length-1].v-pts[0].v)/dtH;
 }
 function pressureBadge(rate){
-  if(rate===null)return {text:'Tendance inconnue',color:'#8B98A0'};
-  if(rate<=-1)return {text:'Chute rapide — coup de vent possible',color:'#D64545'};
-  if(rate<=-0.3)return {text:'En baisse',color:'#E8A33D'};
-  if(rate>=1)return {text:'Remontée rapide',color:'#3E7CD6'};
-  if(rate>=0.3)return {text:'En hausse',color:'#3E7CD6'};
-  return {text:'Stable',color:'#8B98A0'};
+  if(rate===null)return {text:'Tendance inconnue',color:'#8B98A0',arrow:'→'};
+  if(rate<=-1)return {text:'Chute rapide — coup de vent possible',color:'#D64545',arrow:'↓'};
+  if(rate<=-0.3)return {text:'En baisse',color:'#E8A33D',arrow:'↘'};
+  if(rate>=1)return {text:'Remontée rapide',color:'#3E7CD6',arrow:'↑'};
+  if(rate>=0.3)return {text:'En hausse',color:'#3E7CD6',arrow:'↗'};
+  return {text:'Stable',color:'#8B98A0',arrow:'→'};
 }
 function pressureColor(rate){
   if(rate<=-1)return '#D64545';
@@ -409,19 +405,19 @@ function detectRecentAeration(room){
 }
 function aerationFooter(room,m,ext){
   const level=aerationVerdict(m.CO2,m.Humidity);
-  const levelInfo=[
-    {cls:'green',icon:'🟢',label:'Pas nécessaire'},
-    {cls:'orange',icon:'🟠',label:'Aérer conseillé'},
-    {cls:'red',icon:'🔴',label:'Aérer maintenant'}
-  ][level];
+  const label=['Pas nécessaire','Aérer conseillé','Aérer maintenant'][level];
+  const color=gradientColor(level/2);
   const tempDiff=(m.Temperature!==undefined&&ext.Temperature!==undefined)?(m.Temperature-ext.Temperature):null;
   const aeration=detectRecentAeration(room);
-  return `<div class="metric-row" style="margin-top:4px;padding-top:8px;border-top:2px solid ${levelInfo.cls==='green'?'#3FAE56':levelInfo.cls==='orange'?'#E0B23D':'#D64545'};">
-      <span class="metric-label">${levelInfo.icon} Aération</span>
-      <span class="metric-value" style="font-size:12px;">${levelInfo.label}</span>
+  return `<div style="margin-top:auto;padding-top:8px;">
+    <div class="metric-row">
+      <span class="metric-label">Aération</span>
+      <span class="metric-value" style="font-size:12px;">${label}</span>
+      <span class="pastille" style="background:${color}"></span>
     </div>
     ${tempDiff!==null?`<p class="minmax-italic">écart extérieur ${tempDiff>0?'+':''}${tempDiff.toFixed(1)}°C</p>`:''}
-    ${aeration?`<p class="minmax-italic" style="color:#3FAE56;">✅ aération détectée (${Math.round(aeration.from)}→${Math.round(aeration.to)} ppm, ~${aeration.durationMin} min)</p>`:''}`;
+    ${aeration?`<p class="minmax-italic" style="color:#3FAE56;">aération détectée (${Math.round(aeration.from)}→${Math.round(aeration.to)} ppm, ~${aeration.durationMin} min)</p>`:''}
+  </div>`;
 }
 
 function renderCards(latest){
@@ -445,7 +441,7 @@ function renderCards(latest){
     ${tempFooterLine('Extérieur',ext.Temperature,ext.Humidity)}
     ${ext.Humidity!==undefined?metricRowNoAuto('Humidity',ext.Humidity):''}
     ${pressureSource.Pressure!==undefined?metricRowNoAuto('Pressure',pressureSource.Pressure):''}
-    ${pressureSource.Pressure!==undefined?(()=>{const rate=pressureTrend();const b=pressureBadge(rate);return `<p class="minmax-italic" style="font-style:normal;"><span class="dot" style="background:${b.color};width:7px;height:7px;"></span> ${b.text}${rate!==null?' ('+(rate>0?'+':'')+rate.toFixed(1)+' hPa/h)':''}</p>`;})():''}
+    ${pressureSource.Pressure!==undefined?(()=>{const rate=pressureTrend();const b=pressureBadge(rate);return `<p class="minmax-italic" style="font-style:normal;text-align:right;">${b.text}${rate!==null?' ('+(rate>0?'+':'')+rate.toFixed(1)+' hPa/h)':''} <span style="color:${b.color};">${b.arrow}</span></p>`;})():''}
     <div class="wind-block">
       <div class="rose-combo" id="extDailyRoseSlot"></div>
       <div class="wind-text">
@@ -647,11 +643,11 @@ async function buildDailyMinMaxChart(rows){
     }]},
     options:{
       responsive:true, maintainAspectRatio:false,
-      layout:{padding:{top:26,bottom:56}},
+      layout:{padding:{top:22,bottom:50}},
       plugins:{legend:{display:false},tooltip:{callbacks:{label:(ctx)=>ctx.raw.map(v=>v.toFixed(1)+'°C').join(' – ')}}},
       scales:{
         x:{ticks:{color:'#8B98A0',maxRotation:0,minRotation:0,autoSkip:false},grid:{display:false}},
-        y:{display:false}
+        y:{display:false,min:Math.min(...mins)-1.5,max:Math.max(...maxs)+1.5}
       }
     },
     plugins:[minmaxLabels]
@@ -1167,8 +1163,16 @@ function buildCalendarSection(rows){
     document.getElementById('calSelected').textContent='Touche une case pour voir sa valeur.';
     const rowsWrap=document.getElementById('calRows');
     rowsWrap.innerHTML='';
+    let prevYear=null;
     monthKeys.forEach(mk=>{
       const [y,m]=mk.split('-');
+      if(prevYear!==null&&y!==prevYear){
+        const sep=document.createElement('div');
+        sep.style.borderTop='1px dashed rgba(232,236,238,0.4)';
+        sep.style.margin='6px 0';
+        rowsWrap.appendChild(sep);
+      }
+      prevYear=y;
       const row=document.createElement('div');
       row.className='cal-row';
       const label=document.createElement('div');
@@ -1208,6 +1212,30 @@ function buildCalendarSection(rows){
   render('tempMax');
 }
 
+function interpolateRowCircular(row){
+  const n=row.length;
+  const known=[];
+  row.forEach((v,i)=>{if(v!==null)known.push(i);});
+  const out=row.slice();
+  const wasNull=row.map(v=>v===null);
+  if(known.length<2)return {out,wasNull};
+  for(let i=0;i<n;i++){
+    if(out[i]!==null)continue;
+    let before=null,after=null,distB=Infinity,distA=Infinity;
+    known.forEach(k=>{
+      const db=(i-k+n)%n; if(db>0&&db<distB){distB=db;before=k;}
+      const da=(k-i+n)%n; if(da>0&&da<distA){distA=da;after=k;}
+    });
+    if(before===null)out[i]=row[after];
+    else if(after===null)out[i]=row[before];
+    else{
+      const t=distB/(distB+distA);
+      out[i]=row[before]+(row[after]-row[before])*t;
+    }
+  }
+  return {out,wasNull};
+}
+
 function buildWeeklyProfileHeatmap(rows){
   const cutoff=new Date(Date.now()-30*86400000);
   const recentRows=rows.filter(r=>new Date(r.timestamp_utc)>=cutoff);
@@ -1228,6 +1256,7 @@ function buildWeeklyProfileHeatmap(rows){
       <div class="tabs" id="weeklyMetricTabs"><button data-metric="CO2">CO2</button><button data-metric="Noise">Bruit</button></div>
       <div id="weeklyHeatWrap"></div>
       <div class="scale" id="weeklyScale"></div>
+      <p class="hint" id="weeklyInterpNote"></p>
     </div>
   `);
 
@@ -1241,7 +1270,13 @@ function buildWeeklyProfileHeatmap(rows){
       grid[d.getDay()][d.getHours()].push(r.value);
     });
     const avgGrid=grid.map(row=>row.map(arr=>arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:null));
-    const allVals=avgGrid.flat().filter(v=>v!==null);
+    const interpFlags=[];
+    const filledGrid=avgGrid.map(row=>{
+      const {out,wasNull}=interpolateRowCircular(row);
+      interpFlags.push(wasNull);
+      return out;
+    });
+    const allVals=filledGrid.flat().filter(v=>v!==null);
     const wrap=document.getElementById('weeklyHeatWrap');
     const scale=document.getElementById('weeklyScale');
     if(!allVals.length){
@@ -1260,19 +1295,22 @@ function buildWeeklyProfileHeatmap(rows){
     order.forEach(wd=>{
       let cellsHtml='';
       for(let h=0;h<24;h++){
-        const v=avgGrid[wd][h];
-        let bg='#20272d', title=weekdaysFull[wd]+' '+h+'h : pas de données';
+        const v=filledGrid[wd][h];
+        const interpolated=interpFlags[wd][h];
+        let bg='#20272d', title=weekdaysFull[wd]+' '+h+'h : pas de données', style='';
         if(v!==null){
           const norm=vmax>vmin?(v-vmin)/(vmax-vmin):0.5;
           bg=mix('1B2329',ramp,norm);
-          title=weekdaysFull[wd]+' '+h+'h : '+Math.round(v)+metricUnit[curMetric];
+          title=weekdaysFull[wd]+' '+h+'h : '+Math.round(v)+metricUnit[curMetric]+(interpolated?' (estimé)':'');
+          if(interpolated)style='opacity:0.55;outline:1px dashed rgba(232,236,238,0.25);outline-offset:-1px;';
         }
-        cellsHtml+=`<div class="cal-day" title="${title}" style="background:${bg};"></div>`;
+        cellsHtml+=`<div class="cal-day" title="${title}" style="background:${bg};${style}"></div>`;
       }
       rowsHtml+=`<div class="cal-row"><div class="month-label">${weekdaysFull[wd]}</div><div class="days">${cellsHtml}</div></div>`;
     });
     wrap.innerHTML=rowsHtml;
     scale.innerHTML=`<span>${Math.round(vmin)}${metricUnit[curMetric]}</span><div class="grad" style="background:linear-gradient(to right,#1B2329,${mix('1B2329',ramp,1)})"></div><span>${Math.round(vmax)}${metricUnit[curMetric]}</span>`;
+    document.getElementById('weeklyInterpNote').textContent=Object.values(interpFlags).some(r=>r.some(Boolean))?'Cases estompées = estimées par interpolation (données toutes les 3h pour l\'instant).':'';
   }
 
   document.querySelectorAll('#weeklyRoomTabs button').forEach(b=>{
@@ -1434,7 +1472,7 @@ function buildTodayTimeline(){
         const dtMin=(pts[j].t-pts[i].t)/60000;
         if(dtMin>60)break;
         if(pts[i].v-pts[j].v>=300){
-          events.push({t:pts[j].t,icon:'↻',text:`Baisse rapide du CO2 ${room} (${Math.round(pts[i].v)}→${Math.round(pts[j].v)} ppm) → aération probable`});
+          events.push({t:pts[j].t,icon:'⟳',text:`Baisse rapide du CO2 ${room} (${Math.round(pts[i].v)}→${Math.round(pts[j].v)} ppm) → aération probable`});
           i=j; found=true; break;
         }
       }
@@ -1446,7 +1484,7 @@ function buildTodayTimeline(){
     events.push({t:extPts[0].t,icon:'○',text:`Extérieur ${extPts[0].v.toFixed(1)}°C`});
     let maxP=extPts[0],minP=extPts[0];
     extPts.forEach(p=>{if(p.v>maxP.v)maxP=p; if(p.v<minP.v)minP=p;});
-    events.push({t:maxP.t,icon:'◉',text:`Pic extérieur ${maxP.v.toFixed(1)}°C`});
+    events.push({t:maxP.t,icon:'↑',text:`Pic extérieur ${maxP.v.toFixed(1)}°C`});
   }
   const gustPts=(byRoomMetric['Anémomètre|GustStrength']||[]).filter(p=>p.t>=today);
   const angleForGust=byRoomMetric['Anémomètre|WindAngle']||[];
@@ -1457,14 +1495,14 @@ function buildTodayTimeline(){
       let bestA=null,bd=Infinity;
       angleForGust.forEach(p=>{const d=Math.abs(p.t-maxG.t); if(d<bd){bd=d;bestA=p.v;}});
       const dirTxt=bestA!==null?` (${compassLabel(bestA)})`:'';
-      events.push({t:maxG.t,icon:'≋',text:`Rafale ${maxG.v} km/h${dirTxt}`});
+      events.push({t:maxG.t,icon:'≈',text:`Rafale ${maxG.v} km/h${dirTxt}`});
     }
   }
   events.sort((a,b)=>a.t-b.t);
   const main=document.getElementById('mainContent');
   const html=events.length?events.map(e=>{
     const hh=e.t.getHours().toString().padStart(2,'0')+':'+e.t.getMinutes().toString().padStart(2,'0');
-    return `<div class="metric-row"><span class="metric-label">${hh} <span style="color:#8B98A0;">${e.icon}</span></span><span class="metric-value" style="font-size:12px;">${e.text}</span></div>`;
+    return `<div class="timeline-row"><span class="timeline-time">${hh} <span style="color:#8B98A0;">${e.icon}</span></span><span class="timeline-text">${e.text}</span></div>`;
   }).join(''):'<div class="empty">Rien de notable détecté aujourd\'hui pour l\'instant.</div>';
   main.insertAdjacentHTML('beforeend',`
     <div class="cal-section">
@@ -1521,6 +1559,7 @@ function buildNightScores(){
     const s=computeNightStats(k);
     if(s)nights.push(s);
   }
+  nights.reverse();
   const main=document.getElementById('mainContent');
   if(!nights.length){
     main.insertAdjacentHTML('beforeend','<div class="cal-section"><h2>Score "Nuit"</h2><div class="empty">Pas assez de données Chambre pour calculer un score de nuit.</div></div>');
@@ -1538,7 +1577,7 @@ function buildNightScores(){
       </div>
     </div>
   `);
-  let idx=0;
+  let idx=nights.length-1;
   function fmt(v,dec,unit){return v!==null?v.toFixed(dec)+unit:'—';}
   function coloredRow(label,val,metricKey,dec,unit){
     const col=val!==null?pastilleColor(metricKey,val):null;
@@ -1549,14 +1588,14 @@ function buildNightScores(){
     const dateFmt=n.start.toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short'});
     document.getElementById('nightCardBody').innerHTML=`
       <div class="room-title" style="justify-content:space-between;">
-        <span>😴 ${dateFmt}</span>
+        <span>☾ ${dateFmt}</span>
         <span style="color:${nightScoreColor(n.score)};font-family:'JetBrains Mono',monospace;">${n.score}/100</span>
       </div>
-      ${coloredRow('🌡️ Température moyenne',n.tempAvg,'Temperature',1,'°C')}
-      ${coloredRow('💧 Humidité moyenne',n.humAvg,'Humidity',0,'%')}
-      <div class="metric-row"><span class="metric-label">🫁 CO2 moyen / max</span><span class="metric-value" style="${n.co2Avg!==null?'color:'+pastilleColor('CO2',n.co2Avg)+';':''}">${fmt(n.co2Avg,0,'')} / ${fmt(n.co2Max,0,' ppm')}</span></div>
-      <div class="metric-row"><span class="metric-label">🔊 Bruit moyen / pic</span><span class="metric-value" style="${n.noiseAvg!==null?'color:'+pastilleColor('Noise',n.noiseAvg)+';':''}">${fmt(n.noiseAvg,0,'')} / ${fmt(n.noiseMax,0,' dB')}</span></div>
-      <div class="metric-row"><span class="metric-label">⏱️ CO2 > 1000</span><span class="metric-value">${Math.floor(n.co2Above1000/60)}h${Math.round(n.co2Above1000%60).toString().padStart(2,'0')}</span></div>
+      ${coloredRow('○ Température moyenne',n.tempAvg,'Temperature',1,'°C')}
+      ${coloredRow('● Humidité moyenne',n.humAvg,'Humidity',0,'%')}
+      <div class="metric-row"><span class="metric-label">▲ CO2 moyen / max</span><span class="metric-value" style="${n.co2Avg!==null?'color:'+pastilleColor('CO2',n.co2Avg)+';':''}">${fmt(n.co2Avg,0,'')} / ${fmt(n.co2Max,0,' ppm')}</span></div>
+      <div class="metric-row"><span class="metric-label">≈ Bruit moyen / pic</span><span class="metric-value" style="${n.noiseAvg!==null?'color:'+pastilleColor('Noise',n.noiseAvg)+';':''}">${fmt(n.noiseAvg,0,'')} / ${fmt(n.noiseMax,0,' dB')}</span></div>
+      <div class="metric-row"><span class="metric-label">» CO2 > 1000</span><span class="metric-value">${Math.floor(n.co2Above1000/60)}h${Math.round(n.co2Above1000%60).toString().padStart(2,'0')}</span></div>
     `;
     document.getElementById('nightDots').innerHTML=nights.map((nn,i)=>
       `<span data-i="${i}" style="width:${i===idx?10:7}px;height:${i===idx?10:7}px;border-radius:50%;background:${nightScoreColor(nn.score)};cursor:pointer;display:inline-block;${i===idx?'outline:1px solid #E8ECEE;outline-offset:2px;':''}"></span>`
@@ -1636,7 +1675,9 @@ const RECORD_METRICS=[
   {module:'Séjour',metric:'Pressure',label:'Pression max',agg:'max',unit:' hPa'},
   {module:'Séjour',metric:'Pressure',label:'Pression min',agg:'min',unit:' hPa'},
   {module:'Chambre',metric:'Noise',label:'Bruit max (Chambre)',agg:'max',unit:' dB'},
+  {module:'Séjour',metric:'Noise',label:'Bruit max (Séjour)',agg:'max',unit:' dB'},
   {module:'Séjour',metric:'CO2',label:'CO2 max (Séjour)',agg:'max',unit:' ppm'},
+  {module:'Chambre',metric:'CO2',label:'CO2 max (Chambre)',agg:'max',unit:' ppm'},
   {module:'Extérieur',metric:'Humidity',label:'Humidité ext. max',agg:'max',unit:'%'},
   {module:'Extérieur',metric:'Humidity',label:'Humidité ext. min',agg:'min',unit:'%'}
 ];
@@ -1867,9 +1908,9 @@ function buildDashboard(rows){
   buildTodayTimeline();
   buildNightScores();
   buildSolarGainSection();
-  buildRecordsSection(rows);
   buildTimeInZoneSection();
   buildCalendarSection(rows);
+  buildRecordsSection(rows);
 }
 
 async function init(){
