@@ -397,7 +397,7 @@ function detectRecentAeration(room){
       const dtMin=(pts[j].t-pts[i].t)/60000;
       if(dtMin>60)break;
       if(pts[i].v-pts[j].v>=300){
-        return {from:pts[i].v,to:pts[j].v,durationMin:Math.round(dtMin)};
+        return {from:pts[i].v,to:pts[j].v,durationMin:Math.round(dtMin),t:pts[j].t};
       }
     }
   }
@@ -409,6 +409,7 @@ function aerationFooter(room,m,ext){
   const color=gradientColor(level/2);
   const tempDiff=(m.Temperature!==undefined&&ext.Temperature!==undefined)?(m.Temperature-ext.Temperature):null;
   const aeration=detectRecentAeration(room);
+  const hh=aeration?aeration.t.getHours().toString().padStart(2,'0')+':'+aeration.t.getMinutes().toString().padStart(2,'0'):'';
   return `<div style="margin-top:auto;padding-top:8px;">
     <div class="metric-row">
       <span class="metric-label">Aération</span>
@@ -416,7 +417,7 @@ function aerationFooter(room,m,ext){
       <span class="pastille" style="background:${color}"></span>
     </div>
     ${tempDiff!==null?`<p class="minmax-italic">écart extérieur ${tempDiff>0?'+':''}${tempDiff.toFixed(1)}°C</p>`:''}
-    ${aeration?`<p class="minmax-italic" style="color:#3FAE56;">aération détectée (${Math.round(aeration.from)}→${Math.round(aeration.to)} ppm, ~${aeration.durationMin} min)</p>`:''}
+    ${aeration?`<p class="minmax-italic" style="color:#3FAE56;">aération détectée à ${hh}&nbsp;(${Math.round(aeration.from)}→${Math.round(aeration.to)}&nbsp;ppm, ~${aeration.durationMin}&nbsp;min)</p>`:''}
   </div>`;
 }
 
@@ -768,13 +769,26 @@ function buildWindRose7d(){
   `;
 }
 
+function smoothCircular(row,window){
+  const n=row.length;
+  return row.map((_,i)=>{
+    let sum=0,count=0;
+    for(let o=-window;o<=window;o++){
+      const idx=(i+o+n)%n;
+      if(row[idx]!==null&&row[idx]!==undefined){sum+=row[idx];count++;}
+    }
+    return count?sum/count:null;
+  });
+}
 function hourlyProfile(module,metric,days){
   const cutoff=new Date(Date.now()-days*86400000);
   const buckets=Array.from({length:24},()=>[]);
   (byRoomMetric[module+'|'+metric]||[]).filter(p=>p.t>=cutoff).forEach(p=>{
     buckets[p.t.getHours()].push(p.v);
   });
-  return buckets.map(arr=>arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:null);
+  const raw=buckets.map(arr=>arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:null);
+  const {out}=interpolateRowCircular(raw);
+  return smoothCircular(out,1);
 }
 
 function chartWrap(canvasId,unit){
@@ -922,7 +936,8 @@ function buildDayOverlayChart(days){
     const {start:winStart,end:winEnd}=calendarWindow(days,k);
     const periodHours=(winEnd-winStart)/3600000;
     if(periodHours>maxHours)maxHours=periodHours;
-    const pts=(byRoomMetric['Extérieur|Temperature']||[]).filter(p=>p.t>=winStart&&p.t<winEnd).sort((a,b)=>a.t-b.t);
+    let pts=(byRoomMetric['Extérieur|Temperature']||[]).filter(p=>p.t>=winStart&&p.t<winEnd).sort((a,b)=>a.t-b.t);
+    if(days>7)pts=aggregateDaily(pts,'avg');
     if(!pts.length)continue;
     datasets.push({
       label:labels[k],
@@ -991,8 +1006,10 @@ function smoothedRates(pts,windowH){
 }
 function buildPressureChart(rangeDays){
   const cutoff=new Date(Date.now()-rangeDays*86400000);
-  const pts=(byRoomMetric['Séjour|Pressure']||[]).filter(p=>p.t>=cutoff).sort((a,b)=>a.t-b.t);
-  const rates=smoothedRates(pts,3);
+  const aggregated=rangeDays>7;
+  let pts=(byRoomMetric['Séjour|Pressure']||[]).filter(p=>p.t>=cutoff).sort((a,b)=>a.t-b.t);
+  if(aggregated)pts=aggregateDaily(pts,'avg');
+  const rates=smoothedRates(pts,aggregated?72:3);
   const dataset={
     label:'Pression',
     data:pts.map(p=>({x:p.t,y:p.v})),
@@ -1038,7 +1055,7 @@ function buildWindChart(rangeDays){
     afterDatasetsDraw(chart){
       if(!anglePts.length)return;
       const {ctx,chartArea,scales}=chart;
-      const N=Math.min(aggregated?anglePts.length:14,anglePts.length);
+      const N=Math.min(aggregated?70:14,anglePts.length);
       const step=Math.max(1,Math.floor(anglePts.length/N));
       ctx.save();
       for(let i=0;i<anglePts.length;i+=step){
@@ -1273,8 +1290,9 @@ function buildWeeklyProfileHeatmap(rows){
     const interpFlags=[];
     const filledGrid=avgGrid.map(row=>{
       const {out,wasNull}=interpolateRowCircular(row);
+      const smoothedOut=smoothCircular(out,1);
       interpFlags.push(wasNull);
-      return out;
+      return smoothedOut;
     });
     const allVals=filledGrid.flat().filter(v=>v!==null);
     const wrap=document.getElementById('weeklyHeatWrap');
@@ -1371,8 +1389,13 @@ function findGapPeaks(combined){
 
 function buildTempCompareChart(rangeDays){
   const cutoff=new Date(Date.now()-rangeDays*86400000);
-  const extPts=(byRoomMetric['Extérieur|Temperature']||[]).filter(p=>p.t>=cutoff).sort((a,b)=>a.t-b.t);
-  const sejPts=(byRoomMetric['Séjour|Temperature']||[]).filter(p=>p.t>=cutoff).sort((a,b)=>a.t-b.t);
+  const aggregated=rangeDays>7;
+  let extPts=(byRoomMetric['Extérieur|Temperature']||[]).filter(p=>p.t>=cutoff).sort((a,b)=>a.t-b.t);
+  let sejPts=(byRoomMetric['Séjour|Temperature']||[]).filter(p=>p.t>=cutoff).sort((a,b)=>a.t-b.t);
+  if(aggregated){
+    extPts=aggregateDaily(extPts,'avg');
+    sejPts=aggregateDaily(sejPts,'avg');
+  }
   function nearestVal(pts,t){
     let best=null,bd=Infinity;
     pts.forEach(p=>{const d=Math.abs(p.t-t); if(d<bd){bd=d;best=p.v;}});
@@ -1387,11 +1410,13 @@ function buildTempCompareChart(rangeDays){
   const blueData=combined.map(c=>({x:c.t,y:c.ext<c.sej?c.ext:c.sej}));
   const sejData=combined.map(c=>({x:c.t,y:c.sej}));
   const extData=combined.map(c=>({x:c.t,y:c.ext}));
-  const peaks=findGapPeaks(combined);
+  const showLabels=rangeDays<=30;
+  const peaks=showLabels?findGapPeaks(combined):[];
 
   const gapLabels={
     id:'gapLabels',
     afterDatasetsDraw(chart){
+      if(!showLabels)return;
       const {ctx,scales,chartArea}=chart;
       ctx.save();
       ctx.font='10px JetBrains Mono, monospace';
@@ -1642,7 +1667,7 @@ function buildSolarGainSection(){
   const results=rooms.map(r=>({room:r,...detectSolarGainHours(r)})).filter(r=>r.total>=3);
   const main=document.getElementById('mainContent');
   if(!results.length){
-    main.insertAdjacentHTML('beforeend','<div class="cal-section"><h2>☀️ Apports solaires probables</h2><div class="empty">Pas assez d\'épisodes détectés pour dégager une tendance (montée de température sans hausse extérieure ni activité).</div></div>');
+    main.insertAdjacentHTML('beforeend','<div class="cal-section"><h2>Apports solaires probables</h2><div class="empty">Pas assez d\'épisodes détectés pour dégager une tendance (montée de température sans hausse extérieure ni activité).</div></div>');
     return;
   }
   const rowsHtml=results.map(r=>{
@@ -1659,7 +1684,7 @@ function buildSolarGainSection(){
   }).join('');
   main.insertAdjacentHTML('beforeend',`
     <div class="cal-section">
-      <h2>☀️ Apports solaires probables</h2>
+      <h2>Apports solaires probables</h2>
       <p class="hint">Détecté quand la température d'une pièce monte sans que l'extérieur, le CO2 ou l'humidité ne bougent significativement — signe d'un réchauffement par le soleil plutôt que par l'activité ou le chauffage.</p>
       <div style="max-width:480px;">${rowsHtml}</div>
     </div>
@@ -1698,7 +1723,7 @@ function buildRecordsSection(rows){
   const main=document.getElementById('mainContent');
   main.insertAdjacentHTML('beforeend',`
     <div class="cal-section">
-      <h2>🏆 Records</h2>
+      <h2>Records</h2>
       <div class="tabs" id="recordsTabs">
         <button data-y="all">Toutes années</button>
         ${years.map(y=>`<button data-y="${y}">${y}</button>`).join('')}
@@ -1750,7 +1775,7 @@ function buildTimeInZoneSection(){
   const rooms=['Séjour','Cuisine','Chambre'];
   main.insertAdjacentHTML('beforeend',`
     <div class="cal-section">
-      <h2>🕯️ Temps passé par tranche de température</h2>
+      <h2>Temps passé par tranche de température</h2>
       <div class="tabs" id="zoneTabs">
         <button data-r="day">Jour</button><button data-r="week">Semaine</button>
         <button data-r="month">Mois</button><button data-r="season">Saison</button><button data-r="year">Année</button>
@@ -1852,9 +1877,11 @@ function buildDashboard(rows){
 
   function seriesFor(metric,rangeDays){
     const cutoff=new Date(Date.now()-rangeDays*86400000);
+    const aggregated=rangeDays>7;
     return rooms.map(room=>{
       const key=room+'|'+metric;
-      const pts=(byRoomMetric[key]||[]).filter(p=>p.t>=cutoff);
+      let pts=(byRoomMetric[key]||[]).filter(p=>p.t>=cutoff);
+      if(aggregated)pts=aggregateDaily(pts,'avg');
       return {label:room,data:pts.map(p=>({x:p.t,y:p.v})),borderColor:colorFor(room),backgroundColor:colorFor(room),borderWidth:2,pointRadius:0,tension:0.42,_baseTension:0.42};
     }).filter(s=>s.data.length>0);
   }
