@@ -186,7 +186,21 @@ function todayMinMax(module,metric){
   return {min:Math.min(...vals),max:Math.max(...vals)};
 }
 
-function metricRow(module,metric,value,noPastille){
+function tempFooterLine(module,temp,hum){
+  const mm=todayMinMax(module,'Temperature');
+  const parts=[];
+  if(mm)parts.push(`min ${mm.min.toFixed(1)}° · max ${mm.max.toFixed(1)}°`);
+  const dp=dewPoint(temp,hum);
+  if(dp!==null){
+    const gap=temp-dp;
+    let style='';
+    if(gap<=0)style='color:#D64545;';
+    else if(gap<=3)style='color:#E8A33D;';
+    parts.push(`<span style="${style}">rosée ${dp.toFixed(1)}°</span>`);
+  }
+  return parts.length?`<p class="minmax-italic">${parts.join(' · ')}</p>`:'';
+}
+function metricRow(module,metric,value,noPastille,humForDew){
   const unit=METRIC_UNIT[metric]||'';
   const dec=METRIC_DECIMALS[metric]!==undefined?METRIC_DECIMALS[metric]:1;
   const displayVal=(typeof value==='number')?value.toFixed(dec):value;
@@ -194,8 +208,7 @@ function metricRow(module,metric,value,noPastille){
   const tr=trendFor(module,metric);
   let extra='';
   if(metric==='Temperature'){
-    const mm=todayMinMax(module,'Temperature');
-    if(mm)extra=`<p class="minmax-italic">min ${mm.min.toFixed(1)}° · max ${mm.max.toFixed(1)}°</p>`;
+    extra=tempFooterLine(module,value,humForDew);
   }
   return `<div class="metric-row">
     <span class="metric-label">${METRIC_LABEL[metric]||metric}</span>
@@ -333,18 +346,7 @@ function dewPoint(tempC,rh){
   const alpha=((a*tempC)/(b+tempC))+Math.log(rh/100);
   return (b*alpha)/(a-alpha);
 }
-function dewPointRow(temp,hum){
-  const dp=dewPoint(temp,hum);
-  if(dp===null)return '';
-  const gap=temp-dp;
-  let color='';
-  if(gap<=0)color='color:#D64545;';
-  else if(gap<=3)color='color:#E8A33D;';
-  return `<div class="metric-row">
-    <span class="metric-label" style="${color}">Point de rosée</span>
-    <span class="metric-value" style="${color}">${dp.toFixed(1)}°C</span>
-  </div>`;
-}
+
 
 function renderCards(latest){
   const upd=new Date(latest.updated_utc);
@@ -355,19 +357,16 @@ function renderCards(latest){
 
   const ext=rooms['Extérieur']||{};
   const wind=rooms['Anémomètre']||{};
-  const pressureSource=rooms['Séjour']||rooms['Chambre']||{};
+  const pressureSource=rooms['Séjour']||{};
   const gustToday=todayMinMax('Anémomètre','GustStrength');
   const maxDuJour=gustToday?gustToday.max:wind.GustStrength;
-  const extMM=todayMinMax('Extérieur','Temperature');
-  const minMaxLine=extMM?`<p class="minmax-italic">min ${extMM.min.toFixed(1)}° · max ${extMM.max.toFixed(1)}°</p>`:'';
 
   const extCard=document.createElement('div');
   extCard.className='card ext-card';
   extCard.innerHTML=`
     <div class="room-title">Extérieur</div>
     ${ext.Temperature!==undefined?metricRowNoAuto('Temperature',ext.Temperature):''}
-    ${dewPointRow(ext.Temperature,ext.Humidity)}
-    ${minMaxLine}
+    ${tempFooterLine('Extérieur',ext.Temperature,ext.Humidity)}
     ${ext.Humidity!==undefined?metricRowNoAuto('Humidity',ext.Humidity):''}
     ${pressureSource.Pressure!==undefined?metricRowNoAuto('Pressure',pressureSource.Pressure):''}
     ${pressureSource.Pressure!==undefined?(()=>{const rate=pressureTrend();const b=pressureBadge(rate);return `<p class="minmax-italic" style="font-style:normal;"><span class="dot" style="background:${b.color};width:7px;height:7px;"></span> ${b.text}${rate!==null?' ('+(rate>0?'+':'')+rate.toFixed(1)+' hPa/h)':''}</p>`;})():''}
@@ -389,10 +388,7 @@ function renderCards(latest){
     if(!metrics)return;
     const card=document.createElement('div');
     card.className='card';
-    const rowsHtml=METRIC_ORDER.filter(m=>metrics[m]!==undefined).map(m=>{
-      const row=metricRow(room,m,metrics[m]);
-      return m==='Temperature'?row+dewPointRow(metrics.Temperature,metrics.Humidity):row;
-    }).join('');
+    const rowsHtml=METRIC_ORDER.filter(m=>metrics[m]!==undefined).map(m=>metricRow(room,m,metrics[m],false,metrics.Humidity)).join('');
     card.innerHTML=`<div class="room-title"><span class="dot" style="background:${ROOM_COLOR[room]}"></span>${room}</div>${rowsHtml}`;
     wrap.appendChild(card);
   });
@@ -825,30 +821,25 @@ function smoothedRates(pts,windowH){
 }
 function buildPressureChart(rangeDays){
   const cutoff=new Date(Date.now()-rangeDays*86400000);
-  const rooms=['Séjour','Chambre'];
-  const dashes={'Séjour':[],'Chambre':[6,4]};
-  const datasets=rooms.map(room=>{
-    const pts=(byRoomMetric[room+'|Pressure']||[]).filter(p=>p.t>=cutoff).sort((a,b)=>a.t-b.t);
-    const rates=smoothedRates(pts,3);
-    return {
-      label:room,
-      data:pts.map(p=>({x:p.t,y:p.v})),
-      borderWidth:2,pointRadius:0,tension:0.2,
-      borderDash:dashes[room],
-      segment:{borderColor:ctx=>{
-        const rate=(rates[ctx.p0DataIndex]+rates[ctx.p1DataIndex])/2;
-        return pressureColor(rate);
-      }},
-      borderColor:'#8B98A0'
-    };
-  }).filter(s=>s.data.length>0);
+  const pts=(byRoomMetric['Séjour|Pressure']||[]).filter(p=>p.t>=cutoff).sort((a,b)=>a.t-b.t);
+  const rates=smoothedRates(pts,3);
+  const dataset={
+    label:'Pression',
+    data:pts.map(p=>({x:p.t,y:p.v})),
+    borderWidth:2,pointRadius:0,tension:0.2,
+    segment:{borderColor:ctx=>{
+      const rate=(rates[ctx.p0DataIndex]+rates[ctx.p1DataIndex])/2;
+      return pressureColor(rate);
+    }},
+    borderColor:'#8B98A0'
+  };
   return new Chart(document.getElementById('pressureChart'),{
     type:'line',
-    data:{datasets},
+    data:{datasets:pts.length?[dataset]:[]},
     options:{
       responsive:true,maintainAspectRatio:false,
       interaction:{mode:'index',intersect:false},
-      plugins:{legend:{display:false},zoom:ZOOM_OPTS,tooltip:{callbacks:{label:(ctx)=>(ctx.dataset.label||'')+': '+ctx.parsed.y.toFixed(1)+' hPa'}}},
+      plugins:{legend:{display:false},zoom:ZOOM_OPTS,tooltip:{callbacks:{label:(ctx)=>ctx.parsed.y.toFixed(1)+' hPa'}}},
       scales:{x:{type:'time',ticks:{color:'#8B98A0'},grid:{color:'#262F35'}},
               y:{ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}}
     }
@@ -1027,48 +1018,122 @@ function buildCalendarSection(rows){
 }
 
 function buildWeeklyProfileHeatmap(rows){
-  const co2Rows=rows.filter(r=>r.module==='Séjour'&&r.metric==='CO2');
-  if(!co2Rows.length)return;
-  const grid=Array.from({length:7},()=>Array.from({length:24},()=>[]));
-  co2Rows.forEach(r=>{
-    const d=new Date(r.timestamp_utc);
-    grid[d.getDay()][d.getHours()].push(r.value);
-  });
-  const avgGrid=grid.map(row=>row.map(arr=>arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:null));
-  const allVals=avgGrid.flat().filter(v=>v!==null);
-  if(!allVals.length)return;
-  const vmin=Math.min(...allVals), vmax=Math.max(...allVals);
+  const cutoff=new Date(Date.now()-30*86400000);
+  const recentRows=rows.filter(r=>new Date(r.timestamp_utc)>=cutoff);
+  const rooms=['Séjour','Cuisine','Chambre'].filter(room=>recentRows.some(r=>r.module===room&&(r.metric==='CO2'||r.metric==='Noise')));
+  if(!rooms.length)return;
   const weekdaysFull=['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
   const order=[1,2,3,4,5,6,0];
-  let hourHeader='<div class="cal-row"><div class="month-label"></div><div class="days">';
-  for(let h=0;h<24;h++){
-    hourHeader+=`<div style="width:9px;flex-shrink:0;font-size:8px;color:var(--text-muted);text-align:center;">${h%6===0?h:''}</div>`;
-  }
-  hourHeader+='</div></div>';
-  let rowsHtml=hourHeader;
-  order.forEach(wd=>{
-    let cellsHtml='';
-    for(let h=0;h<24;h++){
-      const v=avgGrid[wd][h];
-      let bg='#20272d', title=weekdaysFull[wd]+' '+h+'h : pas de données';
-      if(v!==null){
-        const norm=vmax>vmin?(v-vmin)/(vmax-vmin):0.5;
-        bg=mix('1B2329','3FAE56',norm);
-        title=weekdaysFull[wd]+' '+h+'h : '+Math.round(v)+' ppm';
-      }
-      cellsHtml+=`<div class="cal-day" title="${title}" style="background:${bg};"></div>`;
-    }
-    rowsHtml+=`<div class="cal-row"><div class="month-label">${weekdaysFull[wd]}</div><div class="days">${cellsHtml}</div></div>`;
-  });
+  const metricLabel={CO2:'CO2',Noise:'Bruit'};
+  const metricUnit={CO2:' ppm',Noise:' dB'};
+  const metricRamp={CO2:'3FAE56',Noise:'D64545'};
+
   const main=document.getElementById('mainContent');
   main.insertAdjacentHTML('beforeend',`
     <div class="cal-section">
-      <h2>Profil hebdomadaire type — CO2 Séjour</h2>
-      <p class="hint">Moyenne par heure et jour de la semaine, sur tout l'historique. Fait ressortir tes horaires de présence.</p>
-      <div>${rowsHtml}</div>
-      <div class="scale"><span>${Math.round(vmin)} ppm</span><div class="grad" style="background:linear-gradient(to right,#1B2329,${mix('1B2329','3FAE56',1)})"></div><span>${Math.round(vmax)} ppm</span></div>
+      <h2>Profil hebdomadaire type</h2>
+      <p class="hint">Moyenne par heure et jour de la semaine, sur les 30 derniers jours glissants.</p>
+      <div class="tabs" id="weeklyRoomTabs">${rooms.map(r=>`<button data-room="${r}">${r}</button>`).join('')}</div>
+      <div class="tabs" id="weeklyMetricTabs"><button data-metric="CO2">CO2</button><button data-metric="Noise">Bruit</button></div>
+      <div id="weeklyHeatWrap"></div>
+      <div class="scale" id="weeklyScale"></div>
     </div>
   `);
+
+  let curRoom=rooms[0], curMetric='CO2';
+
+  function render(){
+    const metricRows=recentRows.filter(r=>r.module===curRoom&&r.metric===curMetric);
+    const grid=Array.from({length:7},()=>Array.from({length:24},()=>[]));
+    metricRows.forEach(r=>{
+      const d=new Date(r.timestamp_utc);
+      grid[d.getDay()][d.getHours()].push(r.value);
+    });
+    const avgGrid=grid.map(row=>row.map(arr=>arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:null));
+    const allVals=avgGrid.flat().filter(v=>v!==null);
+    const wrap=document.getElementById('weeklyHeatWrap');
+    const scale=document.getElementById('weeklyScale');
+    if(!allVals.length){
+      wrap.innerHTML='<div class="empty">Pas assez de données récentes pour cette combinaison.</div>';
+      scale.innerHTML='';
+      return;
+    }
+    const vmin=Math.min(...allVals), vmax=Math.max(...allVals);
+    const ramp=metricRamp[curMetric];
+    let hourHeader='<div class="cal-row"><div class="month-label"></div><div class="days">';
+    for(let h=0;h<24;h++){
+      hourHeader+=`<div style="width:9px;flex-shrink:0;font-size:8px;color:var(--text-muted);text-align:center;">${h%6===0?h:''}</div>`;
+    }
+    hourHeader+='</div></div>';
+    let rowsHtml=hourHeader;
+    order.forEach(wd=>{
+      let cellsHtml='';
+      for(let h=0;h<24;h++){
+        const v=avgGrid[wd][h];
+        let bg='#20272d', title=weekdaysFull[wd]+' '+h+'h : pas de données';
+        if(v!==null){
+          const norm=vmax>vmin?(v-vmin)/(vmax-vmin):0.5;
+          bg=mix('1B2329',ramp,norm);
+          title=weekdaysFull[wd]+' '+h+'h : '+Math.round(v)+metricUnit[curMetric];
+        }
+        cellsHtml+=`<div class="cal-day" title="${title}" style="background:${bg};"></div>`;
+      }
+      rowsHtml+=`<div class="cal-row"><div class="month-label">${weekdaysFull[wd]}</div><div class="days">${cellsHtml}</div></div>`;
+    });
+    wrap.innerHTML=rowsHtml;
+    scale.innerHTML=`<span>${Math.round(vmin)}${metricUnit[curMetric]}</span><div class="grad" style="background:linear-gradient(to right,#1B2329,${mix('1B2329',ramp,1)})"></div><span>${Math.round(vmax)}${metricUnit[curMetric]}</span>`;
+  }
+
+  document.querySelectorAll('#weeklyRoomTabs button').forEach(b=>{
+    b.addEventListener('click',()=>{
+      curRoom=b.dataset.room;
+      document.querySelectorAll('#weeklyRoomTabs button').forEach(x=>x.classList.remove('active'));
+      b.classList.add('active');
+      render();
+    });
+  });
+  document.querySelectorAll('#weeklyMetricTabs button').forEach(b=>{
+    b.addEventListener('click',()=>{
+      curMetric=b.dataset.metric;
+      document.querySelectorAll('#weeklyMetricTabs button').forEach(x=>x.classList.remove('active'));
+      b.classList.add('active');
+      render();
+    });
+  });
+  document.querySelector('#weeklyRoomTabs button').classList.add('active');
+  document.querySelector('#weeklyMetricTabs button[data-metric="CO2"]').classList.add('active');
+  render();
+}
+
+function findGapPeaks(combined){
+  const peaks=[];
+  let runStart=0, runSign=null;
+  function closeRun(endIdx){
+    if(runSign===null||runSign===0)return;
+    let maxIdx=runStart, maxAbs=0;
+    for(let i=runStart;i<endIdx;i++){
+      const d=combined[i].ext-combined[i].sej;
+      if(Math.abs(d)>maxAbs){maxAbs=Math.abs(d);maxIdx=i;}
+    }
+    if(maxAbs>=1.5){
+      const c=combined[maxIdx];
+      peaks.push({t:c.t,y:Math.max(c.ext,c.sej),diff:c.ext-c.sej,sign:runSign});
+    }
+  }
+  combined.forEach((c,i)=>{
+    const d=c.ext-c.sej;
+    const sign=d>0.05?1:(d<-0.05?-1:0);
+    if(runSign===null){runSign=sign;runStart=i;}
+    else if(sign!==0&&sign!==runSign){
+      closeRun(i);
+      runSign=sign; runStart=i;
+    }
+  });
+  closeRun(combined.length);
+  peaks.sort((a,b)=>Math.abs(b.diff)-Math.abs(a.diff));
+  const top=peaks.slice(0,40);
+  top.sort((a,b)=>a.t-b.t);
+  return top;
 }
 
 function buildTempCompareChart(rangeDays){
@@ -1089,6 +1154,27 @@ function buildTempCompareChart(rangeDays){
   const blueData=combined.map(c=>({x:c.t,y:c.ext<c.sej?c.ext:c.sej}));
   const sejData=combined.map(c=>({x:c.t,y:c.sej}));
   const extData=combined.map(c=>({x:c.t,y:c.ext}));
+  const peaks=findGapPeaks(combined);
+
+  const gapLabels={
+    id:'gapLabels',
+    afterDatasetsDraw(chart){
+      const {ctx,scales,chartArea}=chart;
+      ctx.save();
+      ctx.font='10px JetBrains Mono, monospace';
+      ctx.textAlign='center';
+      peaks.forEach(p=>{
+        const x=scales.x.getPixelForValue(p.t);
+        if(x<chartArea.left||x>chartArea.right)return;
+        const y=scales.y.getPixelForValue(p.y);
+        const color=p.sign===1?'#D64545':'#3E7CD6';
+        const label=(p.diff>0?'+':'')+p.diff.toFixed(1)+'°';
+        ctx.fillStyle=color;
+        ctx.fillText(label, x, p.sign===1?y-8:y+16);
+      });
+      ctx.restore();
+    }
+  };
 
   return new Chart(document.getElementById('tempCompareChart'),{
     type:'line',
@@ -1106,7 +1192,8 @@ function buildTempCompareChart(rangeDays){
           callbacks:{label:(ctx)=>(ctx.datasetIndex===2?'Séjour: ':'Extérieur: ')+ctx.parsed.y.toFixed(1)+'°C'}}},
       scales:{x:{type:'time',ticks:{color:'#8B98A0'},grid:{color:'#262F35'}},
               y:{ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}}
-    }
+    },
+    plugins:[gapLabels]
   });
 }
 
@@ -1138,7 +1225,7 @@ function buildDashboard(rows){
     <div class="chartbox">${chartWrap('humChart','%')}</div>
     <h2>CO2</h2>
     <div class="chartbox">${chartWrap('co2Chart','ppm')}</div>
-    <h2>Pression — Séjour &amp; Chambre</h2>
+    <h2>Pression</h2>
     <div class="legend"><span><span class="dot" style="background:#8B98A0"></span>Stable</span><span><span class="dot" style="background:#E8A33D"></span>Évolution modérée</span><span><span class="dot" style="background:#D64545"></span>Chute rapide</span><span><span class="dot" style="background:#3E7CD6"></span>Remontée rapide</span></div>
     <div class="chartbox">${chartWrap('pressureChart','hPa')}</div>
     <h2>Bruit — Séjour &amp; Chambre</h2>
