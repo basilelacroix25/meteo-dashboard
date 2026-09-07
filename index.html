@@ -175,6 +175,17 @@ function compassLabel(angle){
   const idx=Math.round(((angle%360)+360)%360/22.5)%16;
   return COMPASS16[idx];
 }
+function fmt24(d){
+  return d.toLocaleString('fr-FR',{hour12:false,day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+}
+function timeAxis(){
+  return {type:'time',
+    time:{displayFormats:{minute:'HH:mm',hour:'HH:mm',day:'dd/MM',week:'dd/MM',month:'MM/yyyy',quarter:'MM/yyyy',year:'yyyy'},tooltipFormat:'dd/MM HH:mm'},
+    ticks:{color:'#8B98A0'},grid:{color:'#262F35'}};
+}
+function tooltipTitle24(items){
+  return items.length?fmt24(new Date(items[0].parsed.x)):'';
+}
 function mix(hexA,hexB,t){
   const pa=hexA.match(/\w\w/g).map(x=>parseInt(x,16));
   const pb=hexB.match(/\w\w/g).map(x=>parseInt(x,16));
@@ -308,8 +319,9 @@ function handleRoseClick(el){
   const dir=el.getAttribute('data-dir');
   const val=el.getAttribute('data-value');
   const capId=el.getAttribute('data-caption');
+  const suffix=el.hasAttribute('data-suffix')?el.getAttribute('data-suffix'):' km/h';
   const cap=capId&&document.getElementById(capId);
-  if(cap)cap.innerHTML=`<b>${dir}</b> : <b>${val} km/h</b>`;
+  if(cap)cap.innerHTML=`<b>${dir}</b> : <b>${val}${suffix}</b>`;
 }
 
 async function fetchJSON(url){
@@ -564,19 +576,117 @@ async function buildDailyMinMaxChart(rows){
   });
 }
 
+function detectWindOnsets(afterH){
+  const anglePts=(byRoomMetric['Anémomètre|WindAngle']||[]).slice().sort((a,b)=>a.t-b.t);
+  const speedPts=(byRoomMetric['Anémomètre|WindStrength']||[]).slice().sort((a,b)=>a.t-b.t);
+  const tempPts=(byRoomMetric['Extérieur|Temperature']||[]).slice().sort((a,b)=>a.t-b.t);
+  const humPts=(byRoomMetric['Extérieur|Humidity']||[]).slice().sort((a,b)=>a.t-b.t);
+  function nearestVal(pts,t,maxDiffH){
+    let best=null,bd=Infinity;
+    pts.forEach(p=>{const d=Math.abs(p.t-t); if(d<bd){bd=d;best=p.v;}});
+    if(bd>maxDiffH*3600000)return null;
+    return best;
+  }
+  const CALM=8, BLOWING=15;
+  let wasCalm=true;
+  const onsets=[];
+  speedPts.forEach(p=>{
+    if(p.v<CALM)wasCalm=true;
+    else if(p.v>=BLOWING&&wasCalm){ onsets.push(p.t); wasCalm=false; }
+  });
+  const results=[];
+  onsets.forEach(t=>{
+    const angle=nearestVal(anglePts,t,1);
+    if(angle===null)return;
+    const tBefore=new Date(t.getTime()-30*60000), tAfter=new Date(t.getTime()+afterH*3600000);
+    const tempBefore=nearestVal(tempPts,tBefore,1), tempAfter=nearestVal(tempPts,tAfter,1);
+    const humBefore=nearestVal(humPts,tBefore,1), humAfter=nearestVal(humPts,tAfter,1);
+    if(tempBefore===null||tempAfter===null)return;
+    results.push({angle,dTemp:tempAfter-tempBefore,dHum:(humBefore!==null&&humAfter!==null)?humAfter-humBefore:null});
+  });
+  return results;
+}
+
+function buildDivergingRoseSVG(values,n,size,opts){
+  opts=opts||{};
+  const cx=size/2, cy=size/2;
+  const margin=opts.margin!==undefined?opts.margin:18;
+  const maxR=size/2-margin;
+  const known=values.filter(v=>v!==null);
+  const maxAbs=Math.max(...known.map(v=>Math.abs(v)),0.001);
+  const step=360/n;
+  let bars='';
+  for(let i=0;i<n;i++){
+    const v=values[i];
+    const angle=i*step;
+    const a0=angle-step/2, a1=angle+step/2;
+    if(v===null){
+      bars+=`<path d="${wedgePath(cx,cy,0,2,a0,a1)}" fill="rgba(139,152,160,0.12)" stroke="none"/>`;
+      continue;
+    }
+    const r=Math.max(3,(Math.abs(v)/maxAbs)*maxR);
+    const color=v>0?'rgba(214,69,69,0.6)':'rgba(62,124,214,0.6)';
+    const clickAttr=opts.captionId?` onclick="handleRoseClick(this)" data-dir="${compassLabel(angle)}" data-value="${(v>0?'+':'')+v.toFixed(1)}" data-caption="${opts.captionId}" data-suffix="${opts.unit||''}" style="cursor:pointer"`:'';
+    bars+=`<path d="${wedgePath(cx,cy,0,r,a0,a1)}" fill="${color}" stroke="#E8ECEE" stroke-width="0.5"${clickAttr}><title>${compassLabel(angle)} : ${(v>0?'+':'')+v.toFixed(1)}${opts.unit||''}</title></path>`;
+  }
+  let grids='';
+  if(opts.grid!==false){
+    [0.5,1].forEach(f=>{grids+=`<circle cx="${cx}" cy="${cy}" r="${maxR*f}" fill="none" stroke="#262F35" stroke-width="1"/>`;});
+  }
+  let labels='';
+  if(opts.labels!==false){
+    [['N',0],['E',90],['S',180],['O',270]].forEach(([txt,ang])=>{
+      const [lx,ly]=polarPoint(cx,cy,maxR+11,ang);
+      labels+=`<text x="${lx}" y="${ly+4}" fill="#B8C0C6" font-size="10" font-weight="600" text-anchor="middle">${txt}</text>`;
+    });
+  }
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${grids}${bars}${labels}</svg>`;
+}
+
+function buildWindImpactRoses(){
+  const events=detectWindOnsets(2);
+  const slot=document.getElementById('windRoseSlot');
+  if(!slot)return;
+  if(events.length<8){
+    slot.insertAdjacentHTML('beforeend','<p class="hint">Pas encore assez de coups de vent détectés (montée rapide au-delà de 15 km/h) pour dégager une tendance direction → météo. Ça s\'affinera avec plus de données.</p>');
+    return;
+  }
+  const n=16, step=360/n;
+  const tempSums=new Array(n).fill(0), tempCounts=new Array(n).fill(0);
+  const humSums=new Array(n).fill(0), humCounts=new Array(n).fill(0);
+  events.forEach(e=>{
+    const idx=Math.round(((e.angle%360)+360)%360/step)%n;
+    tempSums[idx]+=e.dTemp; tempCounts[idx]++;
+    if(e.dHum!==null){humSums[idx]+=e.dHum; humCounts[idx]++;}
+  });
+  const tempVals=tempSums.map((s,i)=>tempCounts[i]?s/tempCounts[i]:null);
+  const humVals=humSums.map((s,i)=>humCounts[i]?s/humCounts[i]:null);
+  slot.insertAdjacentHTML('beforeend',`
+    <p class="hint">Ce que le vent amène : écart de température/humidité extérieure, 2h après le début d'un coup de vent (>15 km/h), selon la direction d'où il souffle. Basé sur ${events.length} épisodes détectés. Rouge = ça monte, bleu = ça descend.</p>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;">
+      <div>
+        <p class="insight-caption" id="roseCaptionTemp">Vent → Température. Touche un secteur.</p>
+        <div class="rosewrap" style="max-width:180px;height:200px;display:flex;align-items:center;justify-content:center;">${buildDivergingRoseSVG(tempVals,16,170,{captionId:'roseCaptionTemp',unit:'°C'})}</div>
+      </div>
+      <div>
+        <p class="insight-caption" id="roseCaptionHum">Vent → Humidité. Touche un secteur.</p>
+        <div class="rosewrap" style="max-width:180px;height:200px;display:flex;align-items:center;justify-content:center;">${buildDivergingRoseSVG(humVals,16,170,{captionId:'roseCaptionHum',unit:'%'})}</div>
+      </div>
+    </div>
+  `);
+}
+
 function buildWindRose7d(){
   const cutoff=new Date(Date.now()-7*86400000);
   const anglePts=(byRoomMetric['Anémomètre|WindAngle']||[]).filter(p=>p.t>=cutoff);
-  if(!anglePts.length)return;
+  const slot=document.getElementById('windRoseSlot');
+  if(!slot||!anglePts.length)return;
   const speedPts=byRoomMetric['Anémomètre|WindStrength']||[];
   const values=computeWindBins(anglePts,speedPts,16);
-
-  const main=document.getElementById('mainContent');
-  main.insertAdjacentHTML('beforeend',`
-    <h2>Rose des vents — moyenne 7 derniers jours</h2>
-    <p class="insight-caption" id="roseCaption7d">Touche un secteur pour voir sa valeur.</p>
+  slot.innerHTML=`
+    <p class="insight-caption" id="roseCaption7d">Rose des vents — moyenne 7 derniers jours. Touche un secteur pour voir sa valeur.</p>
     <div class="rosewrap" style="display:flex;align-items:center;justify-content:center;">${buildRoseSVG(values,16,220,{grid:true,labels:true,captionId:'roseCaption7d'})}</div>
-  `);
+  `;
 }
 
 function hourlyProfile(module,metric,days){
@@ -768,7 +878,7 @@ function buildPressureChart(rangeDays){
   const dataset={
     label:'Pression',
     data:pts.map(p=>({x:p.t,y:p.v})),
-    borderWidth:2,pointRadius:0,tension:0.3,_baseTension:0.3,
+    borderWidth:2,pointRadius:0,tension:0.42,_baseTension:0.42,
     segment:{borderColor:ctx=>{
       const rate=(rates[ctx.p0DataIndex]+rates[ctx.p1DataIndex])/2;
       return pressureColor(rate);
@@ -781,8 +891,8 @@ function buildPressureChart(rangeDays){
     options:{
       responsive:true,maintainAspectRatio:false,
       interaction:{mode:'index',intersect:false},
-      plugins:{legend:{display:false},zoom:ZOOM_OPTS,tooltip:{callbacks:{label:(ctx)=>ctx.parsed.y.toFixed(1)+' hPa'}}},
-      scales:{x:{type:'time',ticks:{color:'#8B98A0'},grid:{color:'#262F35'}},
+      plugins:{legend:{display:false},zoom:ZOOM_OPTS,tooltip:{callbacks:{title:tooltipTitle24,label:(ctx)=>ctx.parsed.y.toFixed(1)+' hPa'}}},
+      scales:{x:timeAxis(),
               y:{ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}}
     }
   });
@@ -799,6 +909,11 @@ function buildWindChart(rangeDays){
     gustPts=aggregateDaily(gustPts,'max');
     anglePts=aggregateDaily(anglePts,'last');
   }
+  function nearestV(pts,t){
+    let best=null,bd=Infinity;
+    pts.forEach(p=>{const d=Math.abs(p.t-t); if(d<bd){bd=d;best=p.v;}});
+    return best;
+  }
 
   const directionArrows={
     id:'directionArrows',
@@ -812,7 +927,10 @@ function buildWindChart(rangeDays){
         const p=anglePts[i];
         const x=scales.x.getPixelForValue(p.t);
         if(x<chartArea.left||x>chartArea.right)continue;
-        const y=chartArea.bottom-10;
+        const avgV=nearestV(avgPts,p.t), gustV=nearestV(gustPts,p.t);
+        const avgY=avgV!==null?scales.y.getPixelForValue(avgV):chartArea.bottom;
+        const gustY=gustV!==null?scales.y.getPixelForValue(gustV):avgY;
+        const y=Math.min(avgY,gustY)-12;
         const goingTo=(p.v+180)%360;
         ctx.save();
         ctx.translate(x,y);
@@ -830,19 +948,28 @@ function buildWindChart(rangeDays){
     type:'line',
     data:{datasets:[
       {label:'Moyenne',data:avgPts.map(p=>({x:p.t,y:p.v})),
-       borderWidth:aggregated?2:1.2,pointRadius:aggregated?2:0,tension:0.3,_baseTension:0.3,
+       borderWidth:aggregated?2:1.2,pointRadius:aggregated?2:0,tension:0.42,_baseTension:0.42,
        segment:{borderColor:ctx=>windIntensityColor(Math.max(ctx.p0.parsed.y,ctx.p1.parsed.y))},
-       borderColor:'#E8ECEE'},
+       borderColor:'#E8ECEE',fill:true,
+       backgroundColor:(context)=>{
+         const {ctx,chartArea}=context.chart;
+         if(!chartArea)return 'rgba(232,236,238,0.15)';
+         const g=ctx.createLinearGradient(0,chartArea.top,0,chartArea.bottom);
+         g.addColorStop(0,'rgba(232,236,238,0.28)');
+         g.addColorStop(1,'rgba(232,236,238,0)');
+         return g;
+       }},
       {label:'Rafale',data:gustPts.map(p=>({x:p.t,y:p.v})),
-       borderWidth:aggregated?2:1.2,pointRadius:aggregated?2:0,borderDash:[5,4],tension:0.3,_baseTension:0.3,
+       borderWidth:aggregated?2:1.2,pointRadius:aggregated?2:0,borderDash:[5,4],tension:0.42,_baseTension:0.42,
        segment:{borderColor:ctx=>windIntensityColor(Math.max(ctx.p0.parsed.y,ctx.p1.parsed.y))},
-       borderColor:'#E8ECEE'}
+       borderColor:'#E8ECEE',fill:false}
     ].filter(s=>s.data.length>0)},
     options:{
       responsive:true,maintainAspectRatio:false,
+      layout:{padding:{top:20}},
       interaction:{mode:'index',intersect:false},
-      plugins:{legend:{display:false},zoom:ZOOM_OPTS,tooltip:{callbacks:{label:(ctx)=>(ctx.dataset.label||'')+': '+ctx.parsed.y+' km/h'}}},
-      scales:{x:{type:'time',ticks:{color:'#8B98A0'},grid:{color:'#262F35'}},
+      plugins:{legend:{display:false},zoom:ZOOM_OPTS,tooltip:{callbacks:{title:tooltipTitle24,label:(ctx)=>(ctx.dataset.label||'')+': '+ctx.parsed.y+' km/h'}}},
+      scales:{x:timeAxis(),
               y:{ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}}
     },
     plugins:[directionArrows]
@@ -1101,7 +1228,6 @@ function buildTempCompareChart(rangeDays){
   const sejData=combined.map(c=>({x:c.t,y:c.sej}));
   const extData=combined.map(c=>({x:c.t,y:c.ext}));
   const peaks=findGapPeaks(combined);
-  const showCrossTimes=rangeDays<=7;
 
   const gapLabels={
     id:'gapLabels',
@@ -1119,19 +1245,30 @@ function buildTempCompareChart(rangeDays){
           ctx.fillStyle=color;
           ctx.fillText(label, x, p.sign===1?y-8:y+18);
         }
-        if(showCrossTimes){
-          [p.crossStart,p.crossEnd].forEach(ct=>{
-            const cx=scales.x.getPixelForValue(ct);
-            if(cx<chartArea.left||cx>chartArea.right)return;
-            ctx.strokeStyle='rgba(232,236,238,0.3)'; ctx.setLineDash([2,3]);
-            ctx.beginPath(); ctx.moveTo(cx,chartArea.bottom-14); ctx.lineTo(cx,chartArea.bottom); ctx.stroke();
-            ctx.setLineDash([]);
-            ctx.fillStyle='#8B98A0'; ctx.font='9px JetBrains Mono, monospace';
-            const hh=ct.getHours().toString().padStart(2,'0')+':'+ct.getMinutes().toString().padStart(2,'0');
-            ctx.fillText(hh, cx, chartArea.bottom-16);
-            ctx.font='10px JetBrains Mono, monospace';
-          });
-        }
+      });
+      // repères d'heure de transition, pleine hauteur, dédupliqués si trop proches à l'écran
+      const crossXs=[];
+      peaks.forEach(p=>{
+        [p.crossStart,p.crossEnd].forEach(ct=>{
+          const cx=scales.x.getPixelForValue(ct);
+          if(cx<chartArea.left||cx>chartArea.right)return;
+          if(crossXs.some(prev=>Math.abs(prev.cx-cx)<28))return;
+          crossXs.push({cx,ct});
+        });
+      });
+      crossXs.forEach(({cx,ct})=>{
+        ctx.strokeStyle='rgba(232,236,238,0.28)'; ctx.setLineDash([3,3]);
+        ctx.beginPath(); ctx.moveTo(cx,chartArea.top); ctx.lineTo(cx,chartArea.bottom); ctx.stroke();
+        ctx.setLineDash([]);
+        const hh=ct.getHours().toString().padStart(2,'0')+':'+ct.getMinutes().toString().padStart(2,'0');
+        ctx.save();
+        ctx.translate(cx,chartArea.top-4);
+        ctx.rotate(-Math.PI/2);
+        ctx.fillStyle='#8B98A0';
+        ctx.font='9px JetBrains Mono, monospace';
+        ctx.textAlign='left';
+        ctx.fillText(hh, 0, 0);
+        ctx.restore();
       });
       ctx.restore();
     }
@@ -1140,18 +1277,19 @@ function buildTempCompareChart(rangeDays){
   return new Chart(document.getElementById('tempCompareChart'),{
     type:'line',
     data:{datasets:[
-      {label:'Extérieur plus chaud',data:redData,borderWidth:0,pointRadius:0,tension:0.3,_baseTension:0.3,fill:2,backgroundColor:'rgba(214,69,69,0.45)'},
-      {label:'Extérieur plus froid',data:blueData,borderWidth:0,pointRadius:0,tension:0.3,_baseTension:0.3,fill:2,backgroundColor:'rgba(62,124,214,0.45)'},
-      {label:'Séjour',data:sejData,borderColor:'#E8ECEE',backgroundColor:'#E8ECEE',borderWidth:2,pointRadius:0,tension:0.3,_baseTension:0.3,fill:false},
-      {label:'Extérieur',data:extData,borderWidth:0,pointRadius:0,tension:0.3,_baseTension:0.3,fill:false,borderColor:'rgba(0,0,0,0)'}
+      {label:'Extérieur plus chaud',data:redData,borderWidth:0,pointRadius:0,tension:0.42,_baseTension:0.42,fill:2,backgroundColor:'rgba(214,69,69,0.45)'},
+      {label:'Extérieur plus froid',data:blueData,borderWidth:0,pointRadius:0,tension:0.42,_baseTension:0.42,fill:2,backgroundColor:'rgba(62,124,214,0.45)'},
+      {label:'Séjour',data:sejData,borderColor:'#E8ECEE',backgroundColor:'#E8ECEE',borderWidth:2,pointRadius:0,tension:0.42,_baseTension:0.42,fill:false},
+      {label:'Extérieur',data:extData,borderWidth:0,pointRadius:0,tension:0.42,_baseTension:0.42,fill:false,borderColor:'rgba(0,0,0,0)'}
     ]},
     options:{
       responsive:true,maintainAspectRatio:false,
+      layout:{padding:{top:34}},
       interaction:{mode:'index',intersect:false},
       plugins:{legend:{display:false},zoom:ZOOM_OPTS,
         tooltip:{filter:(item)=>item.datasetIndex>=2,
-          callbacks:{label:(ctx)=>(ctx.datasetIndex===2?'Séjour: ':'Extérieur: ')+ctx.parsed.y.toFixed(1)+'°C'}}},
-      scales:{x:{type:'time',ticks:{color:'#8B98A0'},grid:{color:'#262F35'}},
+          callbacks:{title:tooltipTitle24,label:(ctx)=>(ctx.datasetIndex===2?'Séjour: ':'Extérieur: ')+ctx.parsed.y.toFixed(1)+'°C'}}},
+      scales:{x:timeAxis(),
               y:{ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}}
     },
     plugins:[gapLabels]
@@ -1193,8 +1331,9 @@ function buildDashboard(rows){
     <h2>Bruit — Séjour &amp; Chambre</h2>
     <div class="chartbox">${chartWrap('noiseChart','dB')}</div>
     <h2>Vent</h2>
+    <div id="windRoseSlot"></div>
     <div class="legend"><span><span class="dot" style="background:#E8ECEE"></span>Moyenne</span><span><span class="dash"></span>Rafale</span><span><span class="dot" style="background:#E8A33D"></span>Fort</span><span><span class="dot" style="background:#D64545"></span>Très fort</span></div>
-    <p class="hint">Les petites flèches en bas indiquent la direction du vent vers laquelle il souffle.</p>
+    <p class="hint">Les petites flèches indiquent la direction du vent vers laquelle il souffle.</p>
     <div class="chartbox">${chartWrap('windChart','km/h')}</div>
     <h2>À quelle heure ça monte / ça descend ?</h2>
     <p class="insight-caption" id="riseFallCaption"></p>
@@ -1216,7 +1355,7 @@ function buildDashboard(rows){
     return rooms.map(room=>{
       const key=room+'|'+metric;
       const pts=(byRoomMetric[key]||[]).filter(p=>p.t>=cutoff);
-      return {label:room,data:pts.map(p=>({x:p.t,y:p.v})),borderColor:colorFor(room),backgroundColor:colorFor(room),borderWidth:2,pointRadius:0,tension:0.3,_baseTension:0.3};
+      return {label:room,data:pts.map(p=>({x:p.t,y:p.v})),borderColor:colorFor(room),backgroundColor:colorFor(room),borderWidth:2,pointRadius:0,tension:0.42,_baseTension:0.42};
     }).filter(s=>s.data.length>0);
   }
 
@@ -1229,8 +1368,8 @@ function buildDashboard(rows){
       options:{
         responsive:true,maintainAspectRatio:false,
         interaction:{mode:'index',intersect:false},
-        plugins:{legend:{display:false},zoom:ZOOM_OPTS,tooltip:{enabled:true,callbacks:{label:(ctx)=>(ctx.dataset.label||'')+': '+ctx.parsed.y+unit}}},
-        scales:{x:{type:'time',ticks:{color:'#8B98A0'},grid:{color:'#262F35'}},
+        plugins:{legend:{display:false},zoom:ZOOM_OPTS,tooltip:{enabled:true,callbacks:{title:tooltipTitle24,label:(ctx)=>(ctx.dataset.label||'')+': '+ctx.parsed.y+unit}}},
+        scales:{x:timeAxis(),
                 y:{ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}}
       }
     });
@@ -1264,6 +1403,7 @@ function buildDashboard(rows){
   render('week');
   buildDailyMinMaxChart(rows);
   buildWindRose7d();
+  buildWindImpactRoses();
   buildWeeklyProfileHeatmap(rows);
   buildCalendarSection(rows);
 }
