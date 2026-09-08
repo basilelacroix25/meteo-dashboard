@@ -145,9 +145,9 @@ const crosshairPlugin={
   id:'crosshair',
   afterDraw(chart){
     if(chart.config.type!=='line')return;
-    const active=chart.getActiveElements&&chart.getActiveElements();
-    if(!active||!active.length)return;
-    const x=active[0].element.x;
+    const tt=chart.tooltip;
+    if(!tt||!tt.opacity||tt.caretX==null)return;
+    const x=tt.caretX;
     const {ctx,chartArea}=chart;
     ctx.save();
     ctx.beginPath();
@@ -469,7 +469,7 @@ function renderCards(latest){
 
 function compassGlowSVG(counts,n,size,arrowAngle){
   const cx=size/2, cy=size/2;
-  const rOuter=size/2-8, rInner=rOuter-10;
+  const rOuter=size/2-14, rInner=rOuter-10;
   const step=360/n;
   const maxC=Math.max(...counts,1);
   let glow='';
@@ -910,12 +910,21 @@ function buildRiseFallChart(days){
   });
 }
 
-const RADAR_METRICS=[
-  {key:'temp',label:'Température int.',unit:'°C',min:15,max:28,rooms:['Séjour','Cuisine','Chambre'],metric:'Temperature',dec:1},
-  {key:'hum',label:'Humidité',unit:'%',min:20,max:80,rooms:['Séjour','Cuisine','Chambre'],metric:'Humidity',dec:0},
-  {key:'co2',label:'CO2',unit:' ppm',min:400,max:1500,rooms:['Séjour','Chambre'],metric:'CO2',dec:0},
-  {key:'noise',label:'Bruit',unit:' dB',min:25,max:60,rooms:['Séjour','Chambre'],metric:'Noise',dec:0}
+const RADAR_METRIC_DEFS=[
+  {label:'Temp.',unit:'°C',min:15,max:28,rooms:['Séjour','Cuisine','Chambre'],metric:'Temperature',dec:1},
+  {label:'Hum.',unit:'%',min:20,max:80,rooms:['Séjour','Cuisine','Chambre'],metric:'Humidity',dec:0},
+  {label:'CO2',unit:' ppm',min:400,max:1500,rooms:['Séjour','Chambre'],metric:'CO2',dec:0},
+  {label:'Bruit',unit:' dB',min:25,max:60,rooms:['Séjour','Chambre'],metric:'Noise',dec:0}
 ];
+const RADAR_METRICS=(()=>{
+  const axes=[];
+  RADAR_METRIC_DEFS.forEach(def=>{
+    def.rooms.forEach(room=>{
+      axes.push({label:def.label+' '+room,unit:def.unit,min:def.min,max:def.max,rooms:[room],metric:def.metric,dec:def.dec});
+    });
+  });
+  return axes;
+})();
 function periodAverage(rooms,metric,start,end){
   let sum=0,count=0;
   rooms.forEach(room=>{
@@ -956,7 +965,56 @@ function buildComfortRadar(rangeDays){
           return ctx.dataset.label+': '+(raw!==null?raw.toFixed(m.dec)+m.unit:'—');
         }}}
       },
-      scales:{r:{min:0,max:100,ticks:{display:false},grid:{color:'#262F35'},angleLines:{color:'#262F35'},pointLabels:{color:'#B8C0C6',font:{size:11}}}}
+      scales:{r:{min:0,max:100,ticks:{display:false},grid:{color:'#262F35'},angleLines:{color:'#262F35'},pointLabels:{color:'#B8C0C6',font:{size:9}}}}
+    }
+  });
+}
+
+function buildClimateScatter(rangeDays){
+  const cutoff=new Date(Date.now()-rangeDays*86400000);
+  const tempPts=(byRoomMetric['Séjour|Temperature']||[]).filter(p=>p.t>=cutoff).sort((a,b)=>a.t-b.t);
+  const humPts=byRoomMetric['Séjour|Humidity']||[];
+  const co2Pts=byRoomMetric['Séjour|CO2']||[];
+  function nearestVal(pts,t,maxDiffH){
+    let best=null,bd=Infinity;
+    pts.forEach(p=>{const d=Math.abs(p.t-t); if(d<bd){bd=d;best=p.v;}});
+    return bd<=maxDiffH*3600000?best:null;
+  }
+  const points=[];
+  tempPts.forEach(p=>{
+    const h=nearestVal(humPts,p.t,1.5);
+    const c=nearestVal(co2Pts,p.t,1.5);
+    if(h!==null&&c!==null)points.push({x:p.v,y:h,co2:c,t:p.t});
+  });
+  const canvas=document.getElementById('climateScatterChart');
+  if(!canvas)return null;
+  if(!points.length)return null;
+  const co2min=400,co2max=1500;
+  const colors=points.map(p=>gradientColor(Math.max(0,Math.min(1,(p.co2-co2min)/(co2max-co2min)))));
+  return new Chart(canvas,{
+    type:'scatter',
+    data:{datasets:[{
+      label:'Séjour',
+      data:points.map(p=>({x:p.x,y:p.y})),
+      backgroundColor:colors,
+      borderColor:colors,
+      pointRadius:4,
+      pointHoverRadius:6
+    }]},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      animation:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{
+        title:()=>'',
+        label:(ctx)=>{
+          const p=points[ctx.dataIndex];
+          return [fmt24(p.t),p.x.toFixed(1)+'°C, '+p.y.toFixed(0)+'%, CO2 '+Math.round(p.co2)+' ppm'];
+        }
+      }}},
+      scales:{
+        x:{title:{display:true,text:'Température (°C)',color:'#8B98A0'},ticks:{color:'#8B98A0'},grid:{color:'#262F35'}},
+        y:{title:{display:true,text:'Humidité (%)',color:'#8B98A0'},ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}
+      }
     }
   });
 }
@@ -1555,7 +1613,8 @@ function buildTempCompareChart(rangeDays){
       {label:'Extérieur plus chaud',data:redData,borderWidth:0,pointRadius:0,tension:0.42,_baseTension:0.42,fill:2,backgroundColor:'rgba(214,69,69,0.45)'},
       {label:'Extérieur plus froid',data:blueData,borderWidth:0,pointRadius:0,tension:0.42,_baseTension:0.42,fill:2,backgroundColor:'rgba(62,124,214,0.45)'},
       {label:'Séjour',data:sejData,borderColor:'#E8ECEE',backgroundColor:'#E8ECEE',borderWidth:2,pointRadius:0,tension:0.42,_baseTension:0.42,fill:false},
-      {label:'Extérieur',data:extData,borderWidth:0,pointRadius:0,tension:0.42,_baseTension:0.42,fill:false,borderColor:'rgba(0,0,0,0)'}
+      {label:'Extérieur',data:extData,borderWidth:0,pointRadius:0,tension:0.42,_baseTension:0.42,fill:false,borderColor:'rgba(0,0,0,0)'},
+      {label:'Écart',data:combined.map(c=>({x:c.t,y:c.ext-c.sej})),borderWidth:0,pointRadius:0,tension:0.42,_baseTension:0.42,fill:false,borderColor:'rgba(0,0,0,0)'}
     ]},
     options:{
       responsive:true,maintainAspectRatio:false,
@@ -1567,13 +1626,12 @@ function buildTempCompareChart(rangeDays){
       plugins:{legend:{display:false},zoom:ZOOM_OPTS,
         tooltip:{filter:(item)=>item.datasetIndex>=2,
           callbacks:{title:tooltipTitle24,
-            label:(ctx)=>(ctx.datasetIndex===2?'Séjour: ':'Extérieur: ')+ctx.parsed.y.toFixed(1)+'°C',
-            afterBody:(items)=>{
-              const sej=items.find(i=>i.datasetIndex===2), ext=items.find(i=>i.datasetIndex===3);
-              if(!sej||!ext)return '';
-              const diff=ext.parsed.y-sej.parsed.y;
-              return 'Écart : '+(diff>0?'+':'')+diff.toFixed(1)+'°C';
-            }}}},
+            label:(ctx)=>{
+              if(ctx.datasetIndex===4)return 'Écart : '+(ctx.parsed.y>=0?'+':'')+ctx.parsed.y.toFixed(1)+'°C';
+              return (ctx.datasetIndex===2?'Séjour: ':'Extérieur: ')+ctx.parsed.y.toFixed(1)+'°C';
+            },
+            labelTextColor:(ctx)=>ctx.datasetIndex===4?(ctx.parsed.y>=0?'#D64545':'#3E7CD6'):'#E8ECEE'
+          }}},
       scales:{x:timeAxis(),
               y:{ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}}
     },
@@ -1748,7 +1806,7 @@ function detectSolarGainHours(room){
   let total=0;
   for(let i=0;i<tempPts.length-1;i++){
     const dtH=(tempPts[i+1].t-tempPts[i].t)/3600000;
-    if(dtH<=0||dtH>2)continue;
+    if(dtH<=0||dtH>3.5)continue;
     const dTemp=tempPts[i+1].v-tempPts[i].v;
     if(dTemp<0.8)continue;
     const extA=nearestVal(extPts,tempPts[i].t), extB=nearestVal(extPts,tempPts[i+1].t);
@@ -1957,7 +2015,11 @@ function buildDashboard(rows){
     <div class="chartbox">${chartWrap('noiseChart','dB')}</div>
     <h2>Confort intérieur</h2>
     <p class="hint">Moyennes sur la période sélectionnée (trait plein) vs période précédente équivalente (pointillé).</p>
-    <div class="chartbox" style="max-width:380px;"><canvas id="comfortRadarChart"></canvas></div>
+    <div class="chartbox" style="max-width:420px;height:380px;"><canvas id="comfortRadarChart"></canvas></div>
+    <h2>Nuage climatique — Séjour</h2>
+    <p class="hint">Chaque point = un relevé. Position = température/humidité, couleur = CO2 (vert = faible, rouge = élevé).</p>
+    <div class="chartbox"><canvas id="climateScatterChart"></canvas></div>
+    <div class="scale"><span>CO2 bas</span><div class="grad" style="background:linear-gradient(to right,#3fae56,#e0b23d,#d64545)"></div><span>CO2 élevé</span></div>
     <h2>Vent</h2>
     <div id="windRoseSlot"></div>
     <div class="legend"><span><span class="dot" style="background:#E8ECEE"></span>Moyenne</span><span><span class="dash"></span>Rafale</span><span><span class="dot" style="background:#E8A33D"></span>Fort</span><span><span class="dot" style="background:#D64545"></span>Très fort</span></div>
@@ -2025,7 +2087,9 @@ function buildDashboard(rows){
     buildWindRoses(d);
     if(charts['comfortRadar'])charts['comfortRadar'].destroy();
     charts['comfortRadar']=buildComfortRadar(d);
-    syncedCharts=Object.values(charts);
+    if(charts['climateScatter'])charts['climateScatter'].destroy();
+    charts['climateScatter']=buildClimateScatter(d);
+    syncedCharts=Object.values(charts).filter(Boolean);
     buildRiseFallChart(d);
     buildDayOverlayChart(d);
   }
