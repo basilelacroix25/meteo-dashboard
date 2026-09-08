@@ -127,6 +127,7 @@ function adjustTension(chart){
 function syncZoomPan(sourceChart){
   const xs=sourceChart.scales.x;
   if(!xs)return;
+  document.querySelectorAll('#rangeTabs button').forEach(b=>b.classList.remove('active'));
   adjustTension(sourceChart);
   sourceChart.update('none');
   syncedCharts.forEach(c=>{
@@ -138,7 +139,7 @@ function syncZoomPan(sourceChart){
   });
 }
 const ZOOM_OPTS={
-  pan:{enabled:true,mode:'x',onPanComplete:({chart})=>syncZoomPan(chart)},
+  pan:{enabled:true,mode:'x',threshold:10,onPanComplete:({chart})=>syncZoomPan(chart)},
   zoom:{wheel:{enabled:true},pinch:{enabled:true},mode:'x',onZoomComplete:({chart})=>syncZoomPan(chart)}
 };
 const crosshairPlugin={
@@ -951,8 +952,8 @@ function buildComfortRadar(rangeDays){
   return new Chart(canvas,{
     type:'radar',
     data:{labels:RADAR_METRICS.map(m=>m.label),datasets:[
-      {label:'Période actuelle',data:curVals,borderColor:'#E8ECEE',backgroundColor:'rgba(232,236,238,0.22)',pointRadius:3,borderWidth:2},
-      {label:'Période précédente',data:prevVals,borderColor:'rgba(232,236,238,0.5)',borderDash:[5,4],backgroundColor:'transparent',pointRadius:0,borderWidth:1.5}
+      {label:'Période précédente',data:prevVals,borderColor:'rgba(232,236,238,0.5)',borderDash:[5,4],backgroundColor:'transparent',pointRadius:0,borderWidth:1.5},
+      {label:'Période actuelle',data:curVals,borderColor:'#E8ECEE',backgroundColor:'rgba(232,236,238,0.22)',pointRadius:0,borderWidth:2}
     ]},
     options:{
       responsive:true,maintainAspectRatio:false,
@@ -961,7 +962,7 @@ function buildComfortRadar(rangeDays){
         legend:{display:true,position:'top',labels:{color:'#8B98A0',boxWidth:12,font:{size:11}}},
         tooltip:{callbacks:{label:(ctx)=>{
           const m=RADAR_METRICS[ctx.dataIndex];
-          const raw=ctx.datasetIndex===0?curRaw[ctx.dataIndex]:prevRaw[ctx.dataIndex];
+          const raw=ctx.datasetIndex===1?curRaw[ctx.dataIndex]:prevRaw[ctx.dataIndex];
           return ctx.dataset.label+': '+(raw!==null?raw.toFixed(m.dec)+m.unit:'—');
         }}}
       },
@@ -970,54 +971,6 @@ function buildComfortRadar(rangeDays){
   });
 }
 
-function buildClimateScatter(rangeDays){
-  const cutoff=new Date(Date.now()-rangeDays*86400000);
-  const tempPts=(byRoomMetric['Séjour|Temperature']||[]).filter(p=>p.t>=cutoff).sort((a,b)=>a.t-b.t);
-  const humPts=byRoomMetric['Séjour|Humidity']||[];
-  const co2Pts=byRoomMetric['Séjour|CO2']||[];
-  function nearestVal(pts,t,maxDiffH){
-    let best=null,bd=Infinity;
-    pts.forEach(p=>{const d=Math.abs(p.t-t); if(d<bd){bd=d;best=p.v;}});
-    return bd<=maxDiffH*3600000?best:null;
-  }
-  const points=[];
-  tempPts.forEach(p=>{
-    const h=nearestVal(humPts,p.t,1.5);
-    const c=nearestVal(co2Pts,p.t,1.5);
-    if(h!==null&&c!==null)points.push({x:p.v,y:h,co2:c,t:p.t});
-  });
-  const canvas=document.getElementById('climateScatterChart');
-  if(!canvas)return null;
-  if(!points.length)return null;
-  const co2min=400,co2max=1500;
-  const colors=points.map(p=>gradientColor(Math.max(0,Math.min(1,(p.co2-co2min)/(co2max-co2min)))));
-  return new Chart(canvas,{
-    type:'scatter',
-    data:{datasets:[{
-      label:'Séjour',
-      data:points.map(p=>({x:p.x,y:p.y})),
-      backgroundColor:colors,
-      borderColor:colors,
-      pointRadius:4,
-      pointHoverRadius:6
-    }]},
-    options:{
-      responsive:true,maintainAspectRatio:false,
-      animation:false,
-      plugins:{legend:{display:false},tooltip:{callbacks:{
-        title:()=>'',
-        label:(ctx)=>{
-          const p=points[ctx.dataIndex];
-          return [fmt24(p.t),p.x.toFixed(1)+'°C, '+p.y.toFixed(0)+'%, CO2 '+Math.round(p.co2)+' ppm'];
-        }
-      }}},
-      scales:{
-        x:{title:{display:true,text:'Température (°C)',color:'#8B98A0'},ticks:{color:'#8B98A0'},grid:{color:'#262F35'}},
-        y:{title:{display:true,text:'Humidité (%)',color:'#8B98A0'},ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}
-      }
-    }
-  });
-}
 
 function calendarWindow(days,k){
   const now=new Date();
@@ -1050,7 +1003,7 @@ function calendarWindow(days,k){
 
 function buildDayOverlayChart(days){
   const canvasWrap=document.getElementById('dayOverlayCanvasWrap');
-  const opacities=[1,0.55,0.32,0.16];
+  const opacities=[1,0.7,0.5,0.32];
   const unitNames={1:['Aujourd\'hui','Hier','Avant-hier','Il y a 3 jours'],7:['Cette semaine','Semaine précédente','Il y a 2 semaines','Il y a 3 semaines'],30:['Ce mois-ci','Mois précédent','Il y a 2 mois','Il y a 3 mois'],90:['Cette saison','Saison précédente','Il y a 2 saisons','Il y a 3 saisons'],365:['Cette année','Année précédente','Il y a 2 ans','Il y a 3 ans']};
   const labels=unitNames[days]||['Période actuelle','Période -1','Période -2','Période -3'];
   const datasets=[];
@@ -1097,7 +1050,15 @@ function buildDayOverlayChart(days){
       hover:{animationDuration:0},
       responsiveAnimationDuration:0,
       plugins:{legend:{display:true,position:'top',labels:{color:'#8B98A0',boxWidth:12,font:{size:11}}},
-               tooltip:{callbacks:{label:(ctx)=>(ctx.dataset.label||'')+': '+ctx.parsed.y.toFixed(1)+'°C'}}},
+               tooltip:{callbacks:{
+                 title:(items)=>{
+                   if(!items.length)return '';
+                   const totalH=Math.round(items[0].parsed.x);
+                   const d=Math.floor(totalH/24), h=totalH%24;
+                   return d>0?(d+'j '+h+'h'):h+'h';
+                 },
+                 label:(ctx)=>(ctx.dataset.label||'')+': '+ctx.parsed.y.toFixed(1)+'°C'
+               }}},
       scales:{x:{type:'linear',min:0,max:maxHours,
                   ticks:{color:'#8B98A0',stepSize:days===1?4:24,
                     callback:(v)=>days===1?(v+'h'):('J'+(v/24+1))}, grid:{display:false}},
@@ -1249,7 +1210,14 @@ function buildWindChart(rangeDays){
       responsiveAnimationDuration:0,
       plugins:{legend:{display:false},zoom:ZOOM_OPTS,tooltip:{callbacks:{
         title:tooltipTitle24,
-        label:(ctx)=>(ctx.dataset.label||'')+': '+ctx.parsed.y.toFixed(1)+' km/h',
+        label:(ctx)=>{
+          const base=(ctx.dataset.label||'')+': '+ctx.parsed.y.toFixed(1)+' km/h';
+          if(ctx.dataset.label==='Rafale'){
+            const a=nearestV(anglePts,new Date(ctx.parsed.x));
+            if(a!==null)return base+' ('+compassLabel(a)+')';
+          }
+          return base;
+        },
         labelColor:(ctx)=>{const c=windIntensityColor(ctx.parsed.y);return {borderColor:c,backgroundColor:c};}
       }}},
       scales:{x:timeAxis(),
@@ -1350,13 +1318,15 @@ function buildCalendarSection(rows){
         const v=dayStats[k]?dayStats[k][metricKey]:null;
         const cell=document.createElement('div');
         cell.className='cal-day';
+        const dateFmt=new Date(k+'T12:00:00Z').toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short',year:'numeric'});
+        cell.title=dateFmt;
         if(v!==null&&v!==undefined){
           const norm=vmax>vmin?(v-vmin)/(vmax-vmin):0.5;
           cell.style.background=mix(cfg.ramp[0],cfg.ramp[1],norm);
           cell.style.cursor='pointer';
+          const unit=metricKey==='windAvg'?'km/h':'°C';
+          cell.title=dateFmt+' — '+v.toFixed(1)+unit;
           cell.addEventListener('click',()=>{
-            const unit=metricKey==='windAvg'?'km/h':'°C';
-            const dateFmt=new Date(k+'T12:00:00Z').toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short',year:'numeric'});
             document.getElementById('calSelected').innerHTML=`<b>${dateFmt}</b> — ${cfg.label} : <b>${v.toFixed(1)}${unit}</b>`;
           });
         }
@@ -1873,11 +1843,17 @@ function computeRecords(rows,year){
       if(rm.agg==='max'&&p.value>best.value)best=p;
       if(rm.agg==='min'&&p.value<best.value)best=p;
     });
-    return {...rm,value:best.value,date:new Date(best.timestamp_utc)};
+    return {...rm,value:best.value,date:new Date(best.timestamp_utc),ts:best.timestamp_utc};
   });
+}
+function computeAllTimeTop3(rows,rm){
+  const pts=rows.filter(r=>r.module===rm.module&&r.metric===rm.metric);
+  const sorted=pts.slice().sort((a,b)=>rm.agg==='max'?b.value-a.value:a.value-b.value);
+  return sorted.slice(0,3).map(p=>p.timestamp_utc);
 }
 function buildRecordsSection(rows){
   const years=[...new Set(rows.map(r=>new Date(r.timestamp_utc).getFullYear()))].sort();
+  const allTimeTop3ByMetric=RECORD_METRICS.map(rm=>computeAllTimeTop3(rows,rm));
   const main=document.getElementById('mainContent');
   main.insertAdjacentHTML('beforeend',`
     <div class="cal-section">
@@ -1892,9 +1868,11 @@ function buildRecordsSection(rows){
   function render(year){
     const records=computeRecords(rows,year);
     const wrap=document.getElementById('recordsRows');
-    wrap.innerHTML=`<div class="card" style="max-width:480px;">${records.filter(r=>r.value!==null).map(r=>{
+    wrap.innerHTML=`<div class="card" style="max-width:480px;">${records.filter(r=>r.value!==null).map((r,i)=>{
       const dateFmt=r.date.toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'});
-      return `<div class="metric-row"><span class="metric-label">${r.label}</span><span class="metric-value">${r.value.toFixed(1)}${r.unit} <span style="color:var(--text-muted);font-size:10px;">(${dateFmt})</span></span></div>`;
+      const rank=allTimeTop3ByMetric[i].indexOf(r.ts);
+      const medal=rank===0?'🥇 ':rank===1?'🥈 ':rank===2?'🥉 ':'';
+      return `<div class="metric-row"><span class="metric-label">${medal}${r.label}</span><span class="metric-value">${r.value.toFixed(1)}${r.unit} <span style="color:var(--text-muted);font-size:10px;">(${dateFmt})</span></span></div>`;
     }).join('')}</div>`;
   }
   document.querySelectorAll('#recordsTabs button').forEach(b=>{
@@ -2016,10 +1994,6 @@ function buildDashboard(rows){
     <h2>Confort intérieur</h2>
     <p class="hint">Moyennes sur la période sélectionnée (trait plein) vs période précédente équivalente (pointillé).</p>
     <div class="chartbox" style="max-width:420px;height:380px;"><canvas id="comfortRadarChart"></canvas></div>
-    <h2>Nuage climatique — Séjour</h2>
-    <p class="hint">Chaque point = un relevé. Position = température/humidité, couleur = CO2 (vert = faible, rouge = élevé).</p>
-    <div class="chartbox"><canvas id="climateScatterChart"></canvas></div>
-    <div class="scale"><span>CO2 bas</span><div class="grad" style="background:linear-gradient(to right,#3fae56,#e0b23d,#d64545)"></div><span>CO2 élevé</span></div>
     <h2>Vent</h2>
     <div id="windRoseSlot"></div>
     <div class="legend"><span><span class="dot" style="background:#E8ECEE"></span>Moyenne</span><span><span class="dash"></span>Rafale</span><span><span class="dot" style="background:#E8A33D"></span>Fort</span><span><span class="dot" style="background:#D64545"></span>Très fort</span></div>
@@ -2087,8 +2061,6 @@ function buildDashboard(rows){
     buildWindRoses(d);
     if(charts['comfortRadar'])charts['comfortRadar'].destroy();
     charts['comfortRadar']=buildComfortRadar(d);
-    if(charts['climateScatter'])charts['climateScatter'].destroy();
-    charts['climateScatter']=buildClimateScatter(d);
     syncedCharts=Object.values(charts).filter(Boolean);
     buildRiseFallChart(d);
     buildDayOverlayChart(d);
@@ -2105,7 +2077,6 @@ function buildDashboard(rows){
   buildWeeklyProfileHeatmap(rows);
   buildTodayTimeline();
   buildNightScores();
-  buildSolarGainSection();
   buildTimeInZoneSection();
   buildCalendarSection(rows);
   buildRecordsSection(rows);
