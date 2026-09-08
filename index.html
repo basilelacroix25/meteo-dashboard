@@ -166,6 +166,36 @@ const crosshairPlugin={
 };
 if(window.Chart){ Chart.register(crosshairPlugin); }
 
+const midnightLinesPlugin={
+  id:'midnightLines',
+  beforeDatasetsDraw(chart){
+    if(chart.config.type!=='line')return;
+    const xs=chart.scales&&chart.scales.x;
+    if(!xs||xs.type!=='time')return;
+    const min=xs.min, max=xs.max;
+    if(min==null||max==null)return;
+    const spanDays=(max-min)/86400000;
+    if(spanDays>32)return;
+    const {ctx,chartArea}=chart;
+    let d=new Date(min); d.setHours(0,0,0,0);
+    if(d.getTime()<min) d=new Date(d.getTime()+86400000);
+    ctx.save();
+    ctx.strokeStyle='rgba(232,236,238,0.35)';
+    ctx.lineWidth=1;
+    let guard=0;
+    while(d.getTime()<=max&&guard<60){
+      const x=xs.getPixelForValue(d.getTime());
+      if(x>=chartArea.left&&x<=chartArea.right){
+        ctx.beginPath();ctx.moveTo(x,chartArea.top);ctx.lineTo(x,chartArea.bottom);ctx.stroke();
+      }
+      d=new Date(d.getTime()+86400000);
+      guard++;
+    }
+    ctx.restore();
+  }
+};
+if(window.Chart){ Chart.register(midnightLinesPlugin); }
+
 function mix3(a,b,k){return 'rgb('+a.map((v,i)=>Math.round(v+(b[i]-v)*k)).join(',')+')';}
 function gradientColor(t){
   const green=[63,174,86], yellow=[224,178,61], red=[214,69,69];
@@ -191,10 +221,7 @@ function timeAxis(){
   return {type:'time',
     time:{displayFormats:{minute:'HH:mm',hour:'HH:mm',day:'dd/MM',week:'dd/MM',month:'MM/yyyy',quarter:'MM/yyyy',year:'yyyy'},tooltipFormat:'dd/MM HH:mm'},
     ticks:{color:'#8B98A0',maxRotation:45,minRotation:45},
-    grid:{color:(ctx)=>{
-      if(!ctx.tick||ctx.tick.value==null)return '#262F35';
-      return new Date(ctx.tick.value).getHours()===0?'rgba(232,236,238,0.3)':'#262F35';
-    }}};
+    grid:{color:'#262F35'}};
 }
 function timeAxisForRange(rangeDays){
   const base=timeAxis();
@@ -507,42 +534,32 @@ function windBarbSVG(cx,cy,goingTo,shaftLen,speedKmh,color){
   color=color||'#E8ECEE';
   const knots=speedKmh/1.852;
   const half=shaftLen/2;
-  const tip=polarPoint(cx,cy,half,goingTo);
-  const tail=polarPoint(cx,cy,half,goingTo+180);
-  let svg=`<line x1="${tail[0].toFixed(1)}" y1="${tail[1].toFixed(1)}" x2="${tip[0].toFixed(1)}" y2="${tip[1].toFixed(1)}" stroke="${color}" stroke-width="2" stroke-linecap="round"/>`;
+  const tipY=cy-half, tailY=cy+half;
+  let inner=`<line x1="${cx}" y1="${tailY.toFixed(1)}" x2="${cx}" y2="${tipY.toFixed(1)}" stroke="${color}" stroke-width="2" stroke-linecap="round"/>`;
   if(knots<3){
-    svg+=`<circle cx="${tip[0].toFixed(1)}" cy="${tip[1].toFixed(1)}" r="3.5" fill="none" stroke="${color}" stroke-width="1.5"/>`;
-    return svg;
+    inner+=`<circle cx="${cx}" cy="${tipY.toFixed(1)}" r="3.5" fill="none" stroke="${color}" stroke-width="1.5"/>`;
+  }else{
+    let units=Math.round(knots/5);
+    let pennants=Math.floor(units/10); units%=10;
+    let fulls=Math.floor(units/2);
+    let halfBarb=units%2;
+    const barbLen=shaftLen*0.32;
+    const barbGap=shaftLen*0.15;
+    let y=tipY;
+    for(let i=0;i<pennants;i++){
+      const y2=y+barbGap*1.3;
+      inner+=`<polygon points="${cx},${y.toFixed(1)} ${(cx+barbLen).toFixed(1)},${(y+barbGap*0.7).toFixed(1)} ${cx},${y2.toFixed(1)}" fill="${color}"/>`;
+      y=y2;
+    }
+    for(let i=0;i<fulls;i++){
+      inner+=`<line x1="${cx}" y1="${y.toFixed(1)}" x2="${(cx+barbLen).toFixed(1)}" y2="${(y+barbLen*0.5).toFixed(1)}" stroke="${color}" stroke-width="2"/>`;
+      y+=barbGap;
+    }
+    if(halfBarb){
+      inner+=`<line x1="${cx}" y1="${y.toFixed(1)}" x2="${(cx+barbLen*0.55).toFixed(1)}" y2="${(y+barbLen*0.28).toFixed(1)}" stroke="${color}" stroke-width="2.2"/>`;
+    }
   }
-  let units=Math.round(knots/5);
-  let pennants=Math.floor(units/10); units%=10;
-  let fulls=Math.floor(units/2);
-  let halfBarb=units%2;
-  const barbLen=shaftLen*0.3;
-  const barbGap=shaftLen*0.13;
-  const barbAngle=goingTo+125;
-  const rad=barbAngle*Math.PI/180;
-  let pos=half;
-  function barbEnd(p,len){
-    const base=polarPoint(cx,cy,p,goingTo);
-    return [base,[base[0]+len*Math.sin(rad),base[1]-len*Math.cos(rad)]];
-  }
-  for(let i=0;i<pennants;i++){
-    const [base,end]=barbEnd(pos,barbLen*1.3);
-    const base2=polarPoint(cx,cy,pos-barbGap*1.3,goingTo);
-    svg+=`<polygon points="${base[0].toFixed(1)},${base[1].toFixed(1)} ${end[0].toFixed(1)},${end[1].toFixed(1)} ${base2[0].toFixed(1)},${base2[1].toFixed(1)}" fill="${color}"/>`;
-    pos-=barbGap*1.3;
-  }
-  for(let i=0;i<fulls;i++){
-    const [base,end]=barbEnd(pos,barbLen);
-    svg+=`<line x1="${base[0].toFixed(1)}" y1="${base[1].toFixed(1)}" x2="${end[0].toFixed(1)}" y2="${end[1].toFixed(1)}" stroke="${color}" stroke-width="2"/>`;
-    pos-=barbGap;
-  }
-  if(halfBarb){
-    const [base,end]=barbEnd(pos,barbLen*0.65);
-    svg+=`<line x1="${base[0].toFixed(1)}" y1="${base[1].toFixed(1)}" x2="${end[0].toFixed(1)}" y2="${end[1].toFixed(1)}" stroke="${color}" stroke-width="2.2"/>`;
-  }
-  return svg;
+  return `<g transform="rotate(${goingTo.toFixed(1)} ${cx} ${cy})">${inner}</g>`;
 }
 
 function compassGlowSVG(counts,n,size,arrowAngle,speedKmh){
@@ -565,7 +582,7 @@ function compassGlowSVG(counts,n,size,arrowAngle,speedKmh){
   }).join('');
   let arrow='';
   if(arrowAngle!==undefined&&arrowAngle!==null){
-    const goingTo=(arrowAngle+180)%360;
+    const goingTo=arrowAngle%360;
     arrow=windBarbSVG(cx,cy,goingTo,rInner*1.7,speedKmh||0);
   }
   return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${ring}${glow}${arrow}${dots}</svg>`;
@@ -2170,7 +2187,7 @@ function buildDashboard(rows){
     <h2>Extérieur vs Séjour</h2>
     <div class="legend"><span><span class="dot" style="background:#E8ECEE"></span>Séjour</span><span><span class="dot" style="background:#D64545"></span>Extérieur plus chaud</span><span><span class="dot" style="background:#3E7CD6"></span>Extérieur plus froid</span></div>
     <p class="hint" id="tempCompareCaption"></p>
-    <div class="chartbox">${chartWrap('tempCompareChart','°C')}</div>
+    <div class="chartbox" style="height:320px;">${chartWrap('tempCompareChart','°C')}</div>
     <h2>Humidité</h2>
     <div class="chartbox">${chartWrap('humChart','%')}</div>
     <h2>CO2</h2>
