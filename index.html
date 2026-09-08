@@ -48,13 +48,13 @@ h2{font-family:'Fraunces',serif;font-weight:500;font-size:1.15rem;margin:2.5rem 
 .legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--text-muted);margin-bottom:10px;}
 .legend span{display:flex;align-items:center;gap:5px;}
 .legend .dash{width:16px;height:0;border-top:2px dashed var(--text-muted);display:inline-block;}
-.chartbox{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px;height:250px;position:relative;margin-bottom:1.5rem;display:flex;flex-direction:column;}
+.chartbox{background:transparent;border:none;border-radius:10px;padding:14px 0;height:250px;position:relative;margin-bottom:1.5rem;display:flex;flex-direction:column;}
 .chartbox.small{height:190px;}
 .axis-label{font-size:11px;color:var(--text-muted);margin:0 0 6px;flex:0 0 auto;}
 .canvas-fill{position:relative;flex:1;min-height:0;}
 .canvas-fill canvas,.chartbox canvas{touch-action:none;}
-.barwrap{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:1.5rem;height:290px;position:relative;}
-.rosewrap{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:1.5rem;height:260px;position:relative;max-width:320px;}
+.barwrap{background:transparent;border:none;border-radius:10px;padding:14px 0;margin-bottom:1.5rem;height:290px;position:relative;}
+.rosewrap{background:transparent;border:none;border-radius:10px;padding:14px 0;margin-bottom:1.5rem;height:260px;position:relative;max-width:320px;}
 .timeline-row{display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-top:1px solid var(--border);font-size:12px;}
 .timeline-row:first-child{border-top:none;}
 .timeline-time{width:78px;flex-shrink:0;color:var(--text-muted);font-family:'JetBrains Mono',monospace;}
@@ -67,7 +67,7 @@ h2{font-family:'Fraunces',serif;font-weight:500;font-size:1.15rem;margin:2.5rem 
 .empty{background:var(--panel);border:1px dashed var(--border);border-radius:10px;padding:2rem;text-align:center;color:var(--text-muted);}
 .scale{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-muted);margin-top:8px;}
 .grad{width:90px;height:8px;border-radius:4px;}
-.insight-caption{font-size:13px;color:var(--text);margin:0 0 10px;}
+.insight-caption{font-size:13px;color:var(--text);margin:0 0 10px;min-height:1.4em;}
 .insight-caption b{font-family:'JetBrains Mono',monospace;font-weight:500;}
 footer{margin-top:3rem;color:var(--text-muted);font-size:12px;}
 </style>
@@ -161,6 +161,33 @@ const crosshairPlugin={
   }
 };
 if(window.Chart){ Chart.register(crosshairPlugin); }
+
+const midnightLinesPlugin={
+  id:'midnightLines',
+  beforeDatasetsDraw(chart){
+    if(chart.config.type!=='line')return;
+    const xs=chart.scales&&chart.scales.x;
+    if(!xs||xs.type!=='time')return;
+    const min=xs.min, max=xs.max;
+    if(min==null||max==null)return;
+    const {ctx,chartArea}=chart;
+    let d=new Date(min); d.setHours(24,0,0,0);
+    ctx.save();
+    ctx.strokeStyle='rgba(232,236,238,0.14)';
+    ctx.lineWidth=1;
+    let guard=0;
+    while(d.getTime()<=max&&guard<500){
+      const x=xs.getPixelForValue(d.getTime());
+      if(x>=chartArea.left&&x<=chartArea.right){
+        ctx.beginPath();ctx.moveTo(x,chartArea.top);ctx.lineTo(x,chartArea.bottom);ctx.stroke();
+      }
+      d=new Date(d.getTime()+86400000);
+      guard++;
+    }
+    ctx.restore();
+  }
+};
+if(window.Chart){ Chart.register(midnightLinesPlugin); }
 
 function mix3(a,b,k){return 'rgb('+a.map((v,i)=>Math.round(v+(b[i]-v)*k)).join(',')+')';}
 function gradientColor(t){
@@ -292,7 +319,7 @@ function buildRoseSVG(values,n,size,opts){
     const a0=angle-step/2, a1=angle+step/2;
     const r=Math.max(2,(values[i]/vmax)*maxR);
     const clickAttr=opts.captionId?` onclick="handleRoseClick(this)" data-dir="${compassLabel(angle)}" data-value="${values[i]}" data-caption="${opts.captionId}" style="cursor:pointer"`:'';
-    bars+=`<path d="${wedgePath(cx,cy,0,r,a0,a1)}" fill="rgba(184,192,198,0.55)" stroke="#E8ECEE" stroke-width="0.6"${clickAttr}><title>${compassLabel(angle)} : ${values[i]} km/h${gustValues?' (rafale '+gustValues[i]+' km/h)':''}</title></path>`;
+    bars+=`<path d="${wedgePath(cx,cy,0,r,a0,a1)}" fill="rgba(184,192,198,0.55)" stroke="#E8ECEE" stroke-width="0.6"${clickAttr}></path>`;
   }
   let gustDots='';
   if(gustValues){
@@ -300,8 +327,9 @@ function buildRoseSVG(values,n,size,opts){
       if(!gustValues[i])continue;
       const angle=i*step;
       const gr=Math.max(2,(gustValues[i]/vmax)*maxR);
-      const [gx,gy]=polarPoint(cx,cy,gr,angle);
-      gustDots+=`<circle cx="${gx.toFixed(1)}" cy="${gy.toFixed(1)}" r="2.5" fill="#E8A33D" stroke="#0E1418" stroke-width="0.6"><title>${compassLabel(angle)} rafale : ${gustValues[i]} km/h</title></circle>`;
+      const [ix,iy]=polarPoint(cx,cy,Math.max(0,gr-5),angle);
+      const [ox,oy]=polarPoint(cx,cy,gr+2,angle);
+      gustDots+=`<line x1="${ix.toFixed(1)}" y1="${iy.toFixed(1)}" x2="${ox.toFixed(1)}" y2="${oy.toFixed(1)}" stroke="#E8ECEE" stroke-width="2" stroke-linecap="round"></line>`;
     }
   }
   let grids='';
@@ -465,7 +493,7 @@ function renderCards(latest){
     </div>
   `;
   wrap.appendChild(extCard);
-  buildExtDailyRose(wind.WindAngle);
+  buildExtDailyRose(wind.WindAngle,wind.WindStrength);
 
   ['Séjour','Cuisine','Chambre'].forEach(room=>{
     const metrics=rooms[room];
@@ -478,7 +506,48 @@ function renderCards(latest){
   });
 }
 
-function compassGlowSVG(counts,n,size,arrowAngle){
+function windBarbSVG(cx,cy,goingTo,shaftLen,speedKmh,color){
+  color=color||'#E8ECEE';
+  const knots=speedKmh/1.852;
+  const tip=polarPoint(cx,cy,shaftLen,goingTo);
+  const tail=polarPoint(cx,cy,shaftLen*0.12,goingTo+180);
+  let svg=`<line x1="${tail[0].toFixed(1)}" y1="${tail[1].toFixed(1)}" x2="${tip[0].toFixed(1)}" y2="${tip[1].toFixed(1)}" stroke="${color}" stroke-width="2" stroke-linecap="round"/>`;
+  if(knots<3){
+    svg+=`<circle cx="${tip[0].toFixed(1)}" cy="${tip[1].toFixed(1)}" r="3.5" fill="none" stroke="${color}" stroke-width="1.5"/>`;
+    return svg;
+  }
+  let units=Math.round(knots/5);
+  let pennants=Math.floor(units/10); units%=10;
+  let fulls=Math.floor(units/2);
+  let half=units%2;
+  const barbLen=shaftLen*0.32;
+  const barbGap=shaftLen*0.16;
+  const barbAngle=goingTo+125;
+  const rad=barbAngle*Math.PI/180;
+  let pos=shaftLen;
+  function barbEnd(p,len){
+    const base=polarPoint(cx,cy,p,goingTo);
+    return [base,[base[0]+len*Math.sin(rad),base[1]-len*Math.cos(rad)]];
+  }
+  for(let i=0;i<pennants;i++){
+    const [base,end]=barbEnd(pos,barbLen*1.3);
+    const base2=polarPoint(cx,cy,pos-barbGap*1.3,goingTo);
+    svg+=`<polygon points="${base[0].toFixed(1)},${base[1].toFixed(1)} ${end[0].toFixed(1)},${end[1].toFixed(1)} ${base2[0].toFixed(1)},${base2[1].toFixed(1)}" fill="${color}"/>`;
+    pos-=barbGap*1.3;
+  }
+  for(let i=0;i<fulls;i++){
+    const [base,end]=barbEnd(pos,barbLen);
+    svg+=`<line x1="${base[0].toFixed(1)}" y1="${base[1].toFixed(1)}" x2="${end[0].toFixed(1)}" y2="${end[1].toFixed(1)}" stroke="${color}" stroke-width="2"/>`;
+    pos-=barbGap;
+  }
+  if(half){
+    const [base,end]=barbEnd(pos,barbLen*0.5);
+    svg+=`<line x1="${base[0].toFixed(1)}" y1="${base[1].toFixed(1)}" x2="${end[0].toFixed(1)}" y2="${end[1].toFixed(1)}" stroke="${color}" stroke-width="2"/>`;
+  }
+  return svg;
+}
+
+function compassGlowSVG(counts,n,size,arrowAngle,speedKmh){
   const cx=size/2, cy=size/2;
   const rOuter=size/2-14, rInner=rOuter-10;
   const step=360/n;
@@ -488,7 +557,7 @@ function compassGlowSVG(counts,n,size,arrowAngle){
     if(!counts[i])continue;
     const opacity=Math.max(0.1,0.85*(counts[i]/maxC));
     const a0=i*step-step/2, a1=i*step+step/2;
-    glow+=`<path d="${wedgePath(cx,cy,rInner,rOuter,a0,a1)}" fill="rgba(232,236,238,${opacity.toFixed(2)})"><title>${compassLabel(i*step)} : ${counts[i]} relevé(s) aujourd'hui</title></path>`;
+    glow+=`<path d="${wedgePath(cx,cy,rInner,rOuter,a0,a1)}" fill="rgba(232,236,238,${opacity.toFixed(2)})"></path>`;
   }
   const ring=`<circle cx="${cx}" cy="${cy}" r="${rOuter}" fill="none" stroke="#262F35" stroke-width="1.5"/>
               <circle cx="${cx}" cy="${cy}" r="${rInner}" fill="none" stroke="#262F35" stroke-width="1"/>`;
@@ -499,19 +568,12 @@ function compassGlowSVG(counts,n,size,arrowAngle){
   let arrow='';
   if(arrowAngle!==undefined&&arrowAngle!==null){
     const goingTo=(arrowAngle+180)%360;
-    const shaftR=rInner*0.62;
-    const [tx,ty]=polarPoint(cx,cy,shaftR,goingTo);
-    const [bx,by]=polarPoint(cx,cy,shaftR,goingTo+180);
-    arrow=`<line x1="${bx.toFixed(1)}" y1="${by.toFixed(1)}" x2="${tx.toFixed(1)}" y2="${ty.toFixed(1)}" stroke="#E8ECEE" stroke-width="2.5" stroke-linecap="round"/>`;
-    const tip=polarPoint(cx,cy,rInner*0.9,goingTo);
-    const wingL=polarPoint(cx,cy,shaftR*0.85,goingTo-11);
-    const wingR=polarPoint(cx,cy,shaftR*0.85,goingTo+11);
-    arrow+=`<polygon points="${tip[0].toFixed(1)},${tip[1].toFixed(1)} ${wingL[0].toFixed(1)},${wingL[1].toFixed(1)} ${wingR[0].toFixed(1)},${wingR[1].toFixed(1)}" fill="#E8ECEE"/>`;
+    arrow=windBarbSVG(cx,cy,goingTo,rInner*0.85,speedKmh||0);
   }
   return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${ring}${glow}${arrow}${dots}</svg>`;
 }
 
-function buildExtDailyRose(currentAngle){
+function buildExtDailyRose(currentAngle,currentSpeed){
   const slot=document.getElementById('extDailyRoseSlot');
   if(!slot)return;
   const today=new Date(); today.setHours(0,0,0,0);
@@ -523,7 +585,7 @@ function buildExtDailyRose(currentAngle){
     const idx=Math.round(a/step)%n;
     counts[idx]++;
   });
-  slot.innerHTML=compassGlowSVG(counts,n,96,currentAngle);
+  slot.innerHTML=compassGlowSVG(counts,n,96,currentAngle,currentSpeed);
 }
 
 const WEATHER_ICON_CACHE={};
@@ -720,7 +782,7 @@ function buildDivergingRoseSVG(values,n,size,opts){
     const r=Math.max(3,(Math.abs(v)/maxAbs)*maxR);
     const color=v>0?'rgba(214,69,69,0.6)':'rgba(62,124,214,0.6)';
     const clickAttr=opts.captionId?` onclick="handleRoseClick(this)" data-dir="${compassLabel(angle)}" data-value="${(v>0?'+':'')+v.toFixed(1)}" data-caption="${opts.captionId}" data-suffix="${opts.unit||''}" style="cursor:pointer"`:'';
-    bars+=`<path d="${wedgePath(cx,cy,0,r,a0,a1)}" fill="${color}" stroke="#E8ECEE" stroke-width="0.5"${clickAttr}><title>${compassLabel(angle)} : ${(v>0?'+':'')+v.toFixed(1)}${opts.unit||''}</title></path>`;
+    bars+=`<path d="${wedgePath(cx,cy,0,r,a0,a1)}" fill="${color}" stroke="#E8ECEE" stroke-width="0.5"${clickAttr}></path>`;
   }
   let grids='';
   if(opts.grid!==false){
@@ -785,7 +847,7 @@ function buildWindRose7d(rangeDays,periodLabel){
   const values=computeWindBins(anglePts,speedPts,16);
   const gustValues=computeWindBins(anglePts,gustPts,16);
   slot.innerHTML=`
-    <p class="insight-caption" id="roseCaption7d">Rose des vents — moyenne sur ${periodLabel}. Point orange = rafale. Touche un secteur pour voir sa valeur.</p>
+    <p class="insight-caption" id="roseCaption7d">Rose des vents — moyenne sur ${periodLabel}. Barre blanche = rafale. Touche un secteur pour voir sa valeur.</p>
     <div class="rosewrap" style="display:flex;align-items:center;justify-content:center;">${buildRoseSVG(values,16,220,{grid:true,labels:true,captionId:'roseCaption7d',gustValues})}</div>
   `;
 }
@@ -1642,7 +1704,11 @@ function buildTempCompareChart(rangeDays){
             },
             labelTextColor:(ctx)=>ctx.datasetIndex===4?(ctx.parsed.y>=0?'#D64545':'#3E7CD6'):'#E8ECEE'
           }}},
-      scales:{x:Object.assign(timeAxis(),{min:new Date(Date.now()-rangeDays*86400000),max:new Date()}),
+      scales:{x:Object.assign(timeAxis(),{min:new Date(Date.now()-rangeDays*86400000),max:new Date(),
+                ticks:Object.assign({},timeAxis().ticks,{maxTicksLimit:24,callback:function(value,index,ticks){
+                  if(index===ticks.length-1)return '';
+                  return this.getLabelForValue(value);
+                }})}),
               y:{ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}}
     },
     plugins:[gapLabels]
@@ -1668,7 +1734,8 @@ function findExtrema(pts,threshold){
       else if(p.v-last.v>=threshold){extrema.push({t:last.t,v:last.v,type:'min'});direction='up';last=p;}
     }
   }
-  return extrema;
+  // le tout premier extremum n'est qu'un artefact du point de départ, pas un vrai retournement
+  return extrema.slice(1);
 }
 function buildTodayTimeline(){
   const today=new Date(); today.setHours(0,0,0,0);
@@ -1698,8 +1765,8 @@ function buildTodayTimeline(){
     events.push({t:extPts[0].t,icon:'○',text:`Extérieur ${extPts[0].v.toFixed(1)}°C`});
     const extrema=findExtrema(extPts,1.2);
     extrema.forEach(e=>{
-      if(e.type==='min')events.push({t:e.t,icon:'↑',text:`Creux extérieur ${e.v.toFixed(1)}°C — ça commence à remonter`});
-      else events.push({t:e.t,icon:'↓',text:`Pic extérieur ${e.v.toFixed(1)}°C — ça commence à redescendre`});
+      if(e.type==='min')events.push({t:e.t,icon:'↑',text:`Min extérieur ${e.v.toFixed(1)}°C`});
+      else events.push({t:e.t,icon:'↓',text:`Max extérieur ${e.v.toFixed(1)}°C`});
     });
   }
   const pressPts=(byRoomMetric['Séjour|Pressure']||[]).filter(p=>p.t>=today).sort((a,b)=>a.t-b.t);
