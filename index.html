@@ -41,7 +41,7 @@ h2{font-family:'Fraunces',serif;font-weight:500;font-size:1.15rem;margin:2.5rem 
 .rose-combo{width:96px;height:96px;flex-shrink:0;}
 .wind-text{font-size:12px;color:var(--text-muted);}
 .wind-text .dir{color:var(--text);font-weight:600;font-size:14px;display:block;margin-bottom:4px;}
-.wind-text b{color:var(--text);font-family:'JetBrains Mono',monospace;font-weight:500;}
+.wind-text b{color:var(--text);font-family:'JetBrains Mono',monospace;font-weight:500;white-space:nowrap;}
 .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:1rem;}
 .tabs button{background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 14px;font-size:13px;cursor:pointer;font-family:'Work Sans',sans-serif;}
 .tabs button.active{background:var(--panel-2);border-color:var(--text-muted);}
@@ -130,7 +130,7 @@ function syncZoomPan(sourceChart){
   adjustTension(sourceChart);
   sourceChart.update('none');
   syncedCharts.forEach(c=>{
-    if(c===sourceChart||c.destroyed)return;
+    if(c===sourceChart||c.destroyed||!c.options.scales||!c.options.scales.x)return;
     c.options.scales.x.min=xs.min;
     c.options.scales.x.max=xs.max;
     adjustTension(c);
@@ -481,21 +481,23 @@ function compassGlowSVG(counts,n,size,arrowAngle){
   }
   const ring=`<circle cx="${cx}" cy="${cy}" r="${rOuter}" fill="none" stroke="#262F35" stroke-width="1.5"/>
               <circle cx="${cx}" cy="${cy}" r="${rInner}" fill="none" stroke="#262F35" stroke-width="1"/>`;
-  const dots=[0,90,180,270].map(a=>{const [x,y]=polarPoint(cx,cy,rOuter+9,a); return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2" fill="#8B98A0"/>`;}).join('');
-  const [nx,ny]=polarPoint(cx,cy,rOuter+9,0);
-  const nLabel=`<text x="${nx.toFixed(1)}" y="${(ny-4).toFixed(1)}" fill="#8B98A0" font-size="9" font-weight="600" text-anchor="middle">N</text>`;
+  const dots=[[0,'N'],[90,'E'],[180,'S'],[270,'O']].map(([a,txt])=>{
+    const [x,y]=polarPoint(cx,cy,rOuter+10,a);
+    return `<text x="${x.toFixed(1)}" y="${(y+3).toFixed(1)}" fill="#8B98A0" font-size="9" font-weight="600" text-anchor="middle">${txt}</text>`;
+  }).join('');
   let arrow='';
   if(arrowAngle!==undefined&&arrowAngle!==null){
     const goingTo=(arrowAngle+180)%360;
-    const [tx,ty]=polarPoint(cx,cy,rInner*0.9,goingTo);
-    const [bx,by]=polarPoint(cx,cy,rInner*0.3,goingTo+180);
+    const shaftR=rInner*0.62;
+    const [tx,ty]=polarPoint(cx,cy,shaftR,goingTo);
+    const [bx,by]=polarPoint(cx,cy,shaftR,goingTo+180);
     arrow=`<line x1="${bx.toFixed(1)}" y1="${by.toFixed(1)}" x2="${tx.toFixed(1)}" y2="${ty.toFixed(1)}" stroke="#E8ECEE" stroke-width="2.5" stroke-linecap="round"/>`;
-    const tip=polarPoint(cx,cy,rInner*0.95,goingTo);
-    const wingL=polarPoint(cx,cy,rInner*0.68,goingTo-11);
-    const wingR=polarPoint(cx,cy,rInner*0.68,goingTo+11);
+    const tip=polarPoint(cx,cy,rInner*0.9,goingTo);
+    const wingL=polarPoint(cx,cy,shaftR*0.85,goingTo-11);
+    const wingR=polarPoint(cx,cy,shaftR*0.85,goingTo+11);
     arrow+=`<polygon points="${tip[0].toFixed(1)},${tip[1].toFixed(1)} ${wingL[0].toFixed(1)},${wingL[1].toFixed(1)} ${wingR[0].toFixed(1)},${wingR[1].toFixed(1)}" fill="#E8ECEE"/>`;
   }
-  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${ring}${glow}${arrow}${dots}${nLabel}</svg>`;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${ring}${glow}${arrow}${dots}</svg>`;
 }
 
 function buildExtDailyRose(currentAngle){
@@ -655,9 +657,10 @@ async function buildDailyMinMaxChart(rows){
   });
 }
 
-function detectWindOnsets(afterH){
-  const anglePts=(byRoomMetric['Anémomètre|WindAngle']||[]).slice().sort((a,b)=>a.t-b.t);
-  const speedPts=(byRoomMetric['Anémomètre|WindStrength']||[]).slice().sort((a,b)=>a.t-b.t);
+function detectWindOnsets(afterH,rangeDays){
+  const cutoff=rangeDays?new Date(Date.now()-rangeDays*86400000):null;
+  const anglePts=(byRoomMetric['Anémomètre|WindAngle']||[]).filter(p=>!cutoff||p.t>=cutoff).sort((a,b)=>a.t-b.t);
+  const speedPts=(byRoomMetric['Anémomètre|WindStrength']||[]).filter(p=>!cutoff||p.t>=cutoff).sort((a,b)=>a.t-b.t);
   const tempPts=(byRoomMetric['Extérieur|Temperature']||[]).slice().sort((a,b)=>a.t-b.t);
   const humPts=(byRoomMetric['Extérieur|Humidity']||[]).slice().sort((a,b)=>a.t-b.t);
   function nearestVal(pts,t,maxDiffH){
@@ -722,12 +725,12 @@ function buildDivergingRoseSVG(values,n,size,opts){
   return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${grids}${bars}${labels}</svg>`;
 }
 
-function buildWindImpactRoses(){
-  const events=detectWindOnsets(2);
+function buildWindImpactRoses(rangeDays,periodLabel){
+  const events=detectWindOnsets(2,rangeDays);
   const slot=document.getElementById('windRoseSlot');
   if(!slot)return;
   if(!events.length){
-    slot.insertAdjacentHTML('beforeend','<p class="hint">Aucun coup de vent détecté (montée rapide au-delà de 15 km/h) sur l\'historique actuel.</p>');
+    slot.insertAdjacentHTML('beforeend',`<p class="hint">Aucun coup de vent détecté (montée rapide au-delà de 15 km/h) sur ${periodLabel}.</p>`);
     return;
   }
   const n=16, step=360/n;
@@ -742,7 +745,7 @@ function buildWindImpactRoses(){
   const tempVals=tempSums.map((s,i)=>tempCounts[i]?s/tempCounts[i]:null);
   const humVals=humSums.map((s,i)=>humCounts[i]?s/humCounts[i]:null);
   slot.insertAdjacentHTML('beforeend',`
-    <p class="hint">Ce que le vent amène : écart de température/humidité extérieure, 2h après le début d'un coup de vent (>15 km/h), selon la direction d'où il souffle. Basé sur ${events.length} épisode${events.length>1?'s':''} détecté${events.length>1?'s':''}${events.length<8?' — échantillon encore faible, à prendre avec prudence':''}. Rouge = ça monte, bleu = ça descend.</p>
+    <p class="hint">Ce que le vent amène : écart de température/humidité extérieure, 2h après le début d'un coup de vent (>15 km/h), selon la direction d'où il souffle. Basé sur ${events.length} épisode${events.length>1?'s':''} détecté${events.length>1?'s':''} sur ${periodLabel}${events.length<8?' — échantillon encore faible, à prendre avec prudence':''}. Rouge = ça monte, bleu = ça descend.</p>
     <div style="display:flex;gap:16px;flex-wrap:wrap;">
       <div>
         <p class="insight-caption" id="roseCaptionTemp">Vent → Température. Touche un secteur.</p>
@@ -756,17 +759,28 @@ function buildWindImpactRoses(){
   `);
 }
 
-function buildWindRose7d(){
-  const cutoff=new Date(Date.now()-7*86400000);
+function buildWindRose7d(rangeDays,periodLabel){
+  const cutoff=new Date(Date.now()-rangeDays*86400000);
   const anglePts=(byRoomMetric['Anémomètre|WindAngle']||[]).filter(p=>p.t>=cutoff);
   const slot=document.getElementById('windRoseSlot');
-  if(!slot||!anglePts.length)return;
+  if(!slot)return;
+  slot.innerHTML='';
+  if(!anglePts.length){
+    slot.innerHTML=`<p class="hint">Pas de données vent sur ${periodLabel}.</p>`;
+    return;
+  }
   const speedPts=byRoomMetric['Anémomètre|WindStrength']||[];
   const values=computeWindBins(anglePts,speedPts,16);
   slot.innerHTML=`
-    <p class="insight-caption" id="roseCaption7d">Rose des vents — moyenne 7 derniers jours. Touche un secteur pour voir sa valeur.</p>
+    <p class="insight-caption" id="roseCaption7d">Rose des vents — moyenne sur ${periodLabel}. Touche un secteur pour voir sa valeur.</p>
     <div class="rosewrap" style="display:flex;align-items:center;justify-content:center;">${buildRoseSVG(values,16,220,{grid:true,labels:true,captionId:'roseCaption7d'})}</div>
   `;
+}
+function buildWindRoses(rangeDays){
+  const labels={1:"aujourd'hui",7:'7 derniers jours',30:'30 derniers jours',90:'90 derniers jours',365:"l'année écoulée"};
+  const periodLabel=labels[rangeDays]||(rangeDays+' derniers jours');
+  buildWindRose7d(rangeDays,periodLabel);
+  buildWindImpactRoses(rangeDays,periodLabel);
 }
 
 function smoothCircular(row,window){
@@ -896,6 +910,57 @@ function buildRiseFallChart(days){
   });
 }
 
+const RADAR_METRICS=[
+  {key:'temp',label:'Température int.',unit:'°C',min:15,max:28,rooms:['Séjour','Cuisine','Chambre'],metric:'Temperature',dec:1},
+  {key:'hum',label:'Humidité',unit:'%',min:20,max:80,rooms:['Séjour','Cuisine','Chambre'],metric:'Humidity',dec:0},
+  {key:'co2',label:'CO2',unit:' ppm',min:400,max:1500,rooms:['Séjour','Chambre'],metric:'CO2',dec:0},
+  {key:'noise',label:'Bruit',unit:' dB',min:25,max:60,rooms:['Séjour','Chambre'],metric:'Noise',dec:0}
+];
+function periodAverage(rooms,metric,start,end){
+  let sum=0,count=0;
+  rooms.forEach(room=>{
+    (byRoomMetric[room+'|'+metric]||[]).forEach(p=>{
+      if(p.t>=start&&p.t<end){sum+=p.v;count++;}
+    });
+  });
+  return count?sum/count:null;
+}
+function buildComfortRadar(rangeDays){
+  const now=new Date();
+  const curEnd=now, curStart=new Date(now.getTime()-rangeDays*86400000);
+  const prevEnd=curStart, prevStart=new Date(curStart.getTime()-rangeDays*86400000);
+  const curRaw=[], prevRaw=[], curVals=[], prevVals=[];
+  RADAR_METRICS.forEach(m=>{
+    const cv=periodAverage(m.rooms,m.metric,curStart,curEnd);
+    const pv=periodAverage(m.rooms,m.metric,prevStart,prevEnd);
+    curRaw.push(cv); prevRaw.push(pv);
+    curVals.push(cv!==null?Math.max(0,Math.min(100,((cv-m.min)/(m.max-m.min))*100)):0);
+    prevVals.push(pv!==null?Math.max(0,Math.min(100,((pv-m.min)/(m.max-m.min))*100)):0);
+  });
+  const canvas=document.getElementById('comfortRadarChart');
+  if(!canvas)return null;
+  return new Chart(canvas,{
+    type:'radar',
+    data:{labels:RADAR_METRICS.map(m=>m.label),datasets:[
+      {label:'Période actuelle',data:curVals,borderColor:'#E8ECEE',backgroundColor:'rgba(232,236,238,0.22)',pointRadius:3,borderWidth:2},
+      {label:'Période précédente',data:prevVals,borderColor:'rgba(232,236,238,0.5)',borderDash:[5,4],backgroundColor:'transparent',pointRadius:0,borderWidth:1.5}
+    ]},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      animation:false,
+      plugins:{
+        legend:{display:true,position:'top',labels:{color:'#8B98A0',boxWidth:12,font:{size:11}}},
+        tooltip:{callbacks:{label:(ctx)=>{
+          const m=RADAR_METRICS[ctx.dataIndex];
+          const raw=ctx.datasetIndex===0?curRaw[ctx.dataIndex]:prevRaw[ctx.dataIndex];
+          return ctx.dataset.label+': '+(raw!==null?raw.toFixed(m.dec)+m.unit:'—');
+        }}}
+      },
+      scales:{r:{min:0,max:100,ticks:{display:false},grid:{color:'#262F35'},angleLines:{color:'#262F35'},pointLabels:{color:'#B8C0C6',font:{size:11}}}}
+    }
+  });
+}
+
 function calendarWindow(days,k){
   const now=new Date();
   if(days===1){
@@ -932,15 +997,27 @@ function buildDayOverlayChart(days){
   const labels=unitNames[days]||['Période actuelle','Période -1','Période -2','Période -3'];
   const datasets=[];
   let maxHours=days*24;
+  let refAvg=null;
   for(let k=0;k<4;k++){
     const {start:winStart,end:winEnd}=calendarWindow(days,k);
     const periodHours=(winEnd-winStart)/3600000;
     if(periodHours>maxHours)maxHours=periodHours;
     let pts=(byRoomMetric['Extérieur|Temperature']||[]).filter(p=>p.t>=winStart&&p.t<winEnd).sort((a,b)=>a.t-b.t);
+    const avg=pts.length?pts.reduce((a,p)=>a+p.v,0)/pts.length:null;
+    if(k===0)refAvg=avg;
     if(days>7)pts=aggregateDaily(pts,'avg');
     if(!pts.length)continue;
+    let labelTxt=labels[k];
+    if(avg!==null){
+      labelTxt+=' ('+avg.toFixed(1)+'°C';
+      if(k>0&&refAvg!==null){
+        const diff=refAvg-avg;
+        labelTxt+=', '+(diff>=0?'+':'')+diff.toFixed(1)+'°C';
+      }
+      labelTxt+=')';
+    }
     datasets.push({
-      label:labels[k],
+      label:labelTxt,
       data:pts.map(p=>({x:(p.t-winStart)/3600000,y:p.v})),
       borderColor:`rgba(232,236,238,${opacities[k]})`,
       backgroundColor:`rgba(232,236,238,${opacities[k]})`,
@@ -958,6 +1035,9 @@ function buildDayOverlayChart(days){
     data:{datasets},
     options:{responsive:true,maintainAspectRatio:false,
       interaction:{mode:'index',intersect:false},
+      animation:false,
+      hover:{animationDuration:0},
+      responsiveAnimationDuration:0,
       plugins:{legend:{display:true,position:'top',labels:{color:'#8B98A0',boxWidth:12,font:{size:11}}},
                tooltip:{callbacks:{label:(ctx)=>(ctx.dataset.label||'')+': '+ctx.parsed.y.toFixed(1)+'°C'}}},
       scales:{x:{type:'linear',min:0,max:maxHours,
@@ -1026,6 +1106,9 @@ function buildPressureChart(rangeDays){
     options:{
       responsive:true,maintainAspectRatio:false,
       interaction:{mode:'index',intersect:false},
+      animation:false,
+      hover:{animationDuration:0},
+      responsiveAnimationDuration:0,
       plugins:{legend:{display:false},zoom:ZOOM_OPTS,tooltip:{callbacks:{title:tooltipTitle24,label:(ctx)=>ctx.parsed.y.toFixed(1)+' hPa'}}},
       scales:{x:timeAxis(),
               y:{ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}}
@@ -1103,7 +1186,14 @@ function buildWindChart(rangeDays){
       responsive:true,maintainAspectRatio:false,
       layout:{padding:{top:20}},
       interaction:{mode:'index',intersect:false},
-      plugins:{legend:{display:false},zoom:ZOOM_OPTS,tooltip:{callbacks:{title:tooltipTitle24,label:(ctx)=>(ctx.dataset.label||'')+': '+ctx.parsed.y+' km/h'}}},
+      animation:false,
+      hover:{animationDuration:0},
+      responsiveAnimationDuration:0,
+      plugins:{legend:{display:false},zoom:ZOOM_OPTS,tooltip:{callbacks:{
+        title:tooltipTitle24,
+        label:(ctx)=>(ctx.dataset.label||'')+': '+ctx.parsed.y.toFixed(1)+' km/h',
+        labelColor:(ctx)=>{const c=windIntensityColor(ctx.parsed.y);return {borderColor:c,backgroundColor:c};}
+      }}},
       scales:{x:timeAxis(),
               y:{ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}}
     },
@@ -1471,9 +1561,19 @@ function buildTempCompareChart(rangeDays){
       responsive:true,maintainAspectRatio:false,
       layout:{padding:{top:34}},
       interaction:{mode:'index',intersect:false},
+      animation:false,
+      hover:{animationDuration:0},
+      responsiveAnimationDuration:0,
       plugins:{legend:{display:false},zoom:ZOOM_OPTS,
         tooltip:{filter:(item)=>item.datasetIndex>=2,
-          callbacks:{title:tooltipTitle24,label:(ctx)=>(ctx.datasetIndex===2?'Séjour: ':'Extérieur: ')+ctx.parsed.y.toFixed(1)+'°C'}}},
+          callbacks:{title:tooltipTitle24,
+            label:(ctx)=>(ctx.datasetIndex===2?'Séjour: ':'Extérieur: ')+ctx.parsed.y.toFixed(1)+'°C',
+            afterBody:(items)=>{
+              const sej=items.find(i=>i.datasetIndex===2), ext=items.find(i=>i.datasetIndex===3);
+              if(!sej||!ext)return '';
+              const diff=ext.parsed.y-sej.parsed.y;
+              return 'Écart : '+(diff>0?'+':'')+diff.toFixed(1)+'°C';
+            }}}},
       scales:{x:timeAxis(),
               y:{ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}}
     },
@@ -1855,6 +1955,9 @@ function buildDashboard(rows){
     <div class="chartbox">${chartWrap('pressureChart','hPa')}</div>
     <h2>Bruit — Séjour &amp; Chambre</h2>
     <div class="chartbox">${chartWrap('noiseChart','dB')}</div>
+    <h2>Confort intérieur</h2>
+    <p class="hint">Moyennes sur la période sélectionnée (trait plein) vs période précédente équivalente (pointillé).</p>
+    <div class="chartbox" style="max-width:380px;"><canvas id="comfortRadarChart"></canvas></div>
     <h2>Vent</h2>
     <div id="windRoseSlot"></div>
     <div class="legend"><span><span class="dot" style="background:#E8ECEE"></span>Moyenne</span><span><span class="dash"></span>Rafale</span><span><span class="dot" style="background:#E8A33D"></span>Fort</span><span><span class="dot" style="background:#D64545"></span>Très fort</span></div>
@@ -1895,6 +1998,9 @@ function buildDashboard(rows){
       options:{
         responsive:true,maintainAspectRatio:false,
         interaction:{mode:'index',intersect:false},
+      animation:false,
+      hover:{animationDuration:0},
+      responsiveAnimationDuration:0,
         plugins:{legend:{display:false},zoom:ZOOM_OPTS,tooltip:{enabled:true,callbacks:{title:tooltipTitle24,label:(ctx)=>(ctx.dataset.label||'')+': '+ctx.parsed.y+unit}}},
         scales:{x:timeAxis(),
                 y:{ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}}
@@ -1916,6 +2022,9 @@ function buildDashboard(rows){
     charts['tempCompareChart']=buildTempCompareChart(d);
     if(charts['windChart'])charts['windChart'].destroy();
     charts['windChart']=buildWindChart(d);
+    buildWindRoses(d);
+    if(charts['comfortRadar'])charts['comfortRadar'].destroy();
+    charts['comfortRadar']=buildComfortRadar(d);
     syncedCharts=Object.values(charts);
     buildRiseFallChart(d);
     buildDayOverlayChart(d);
@@ -1929,8 +2038,6 @@ function buildDashboard(rows){
   document.querySelector('#rangeTabs button[data-r="week"]').classList.add('active');
   render('week');
   buildDailyMinMaxChart(rows);
-  buildWindRose7d();
-  buildWindImpactRoses();
   buildWeeklyProfileHeatmap(rows);
   buildTodayTimeline();
   buildNightScores();
