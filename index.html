@@ -162,33 +162,6 @@ const crosshairPlugin={
 };
 if(window.Chart){ Chart.register(crosshairPlugin); }
 
-const midnightLinesPlugin={
-  id:'midnightLines',
-  beforeDatasetsDraw(chart){
-    if(chart.config.type!=='line')return;
-    const xs=chart.scales&&chart.scales.x;
-    if(!xs||xs.type!=='time')return;
-    const min=xs.min, max=xs.max;
-    if(min==null||max==null)return;
-    const {ctx,chartArea}=chart;
-    let d=new Date(min); d.setHours(24,0,0,0);
-    ctx.save();
-    ctx.strokeStyle='rgba(232,236,238,0.14)';
-    ctx.lineWidth=1;
-    let guard=0;
-    while(d.getTime()<=max&&guard<500){
-      const x=xs.getPixelForValue(d.getTime());
-      if(x>=chartArea.left&&x<=chartArea.right){
-        ctx.beginPath();ctx.moveTo(x,chartArea.top);ctx.lineTo(x,chartArea.bottom);ctx.stroke();
-      }
-      d=new Date(d.getTime()+86400000);
-      guard++;
-    }
-    ctx.restore();
-  }
-};
-if(window.Chart){ Chart.register(midnightLinesPlugin); }
-
 function mix3(a,b,k){return 'rgb('+a.map((v,i)=>Math.round(v+(b[i]-v)*k)).join(',')+')';}
 function gradientColor(t){
   const green=[63,174,86], yellow=[224,178,61], red=[214,69,69];
@@ -213,7 +186,28 @@ function fmt24(d){
 function timeAxis(){
   return {type:'time',
     time:{displayFormats:{minute:'HH:mm',hour:'HH:mm',day:'dd/MM',week:'dd/MM',month:'MM/yyyy',quarter:'MM/yyyy',year:'yyyy'},tooltipFormat:'dd/MM HH:mm'},
-    ticks:{color:'#8B98A0'},grid:{color:'#262F35'}};
+    ticks:{color:'#8B98A0',maxRotation:45,minRotation:45},
+    grid:{color:(ctx)=>{
+      if(!ctx.tick||ctx.tick.value==null)return '#262F35';
+      return new Date(ctx.tick.value).getHours()===0?'rgba(232,236,238,0.3)':'#262F35';
+    }}};
+}
+function timeAxisForRange(rangeDays){
+  const base=timeAxis();
+  if(rangeDays===1){
+    base.time.unit='hour'; base.time.stepSize=3;
+    base.time.displayFormats.hour='HH:mm';
+  }else if(rangeDays===7){
+    base.time.unit='hour'; base.time.stepSize=6;
+    base.time.displayFormats.hour='HH:mm';
+  }else if(rangeDays<=90){
+    base.time.unit='day'; base.time.stepSize=rangeDays===30?2:7;
+    base.time.displayFormats.day='dd/MM';
+  }else{
+    base.time.unit='month'; base.time.stepSize=1;
+    base.time.displayFormats.month='MM/yyyy';
+  }
+  return base;
 }
 function tooltipTitle24(items){
   return items.length?fmt24(new Date(items[0].parsed.x)):'';
@@ -509,8 +503,9 @@ function renderCards(latest){
 function windBarbSVG(cx,cy,goingTo,shaftLen,speedKmh,color){
   color=color||'#E8ECEE';
   const knots=speedKmh/1.852;
-  const tip=polarPoint(cx,cy,shaftLen,goingTo);
-  const tail=polarPoint(cx,cy,shaftLen*0.12,goingTo+180);
+  const half=shaftLen/2;
+  const tip=polarPoint(cx,cy,half,goingTo);
+  const tail=polarPoint(cx,cy,half,goingTo+180);
   let svg=`<line x1="${tail[0].toFixed(1)}" y1="${tail[1].toFixed(1)}" x2="${tip[0].toFixed(1)}" y2="${tip[1].toFixed(1)}" stroke="${color}" stroke-width="2" stroke-linecap="round"/>`;
   if(knots<3){
     svg+=`<circle cx="${tip[0].toFixed(1)}" cy="${tip[1].toFixed(1)}" r="3.5" fill="none" stroke="${color}" stroke-width="1.5"/>`;
@@ -519,12 +514,12 @@ function windBarbSVG(cx,cy,goingTo,shaftLen,speedKmh,color){
   let units=Math.round(knots/5);
   let pennants=Math.floor(units/10); units%=10;
   let fulls=Math.floor(units/2);
-  let half=units%2;
-  const barbLen=shaftLen*0.32;
-  const barbGap=shaftLen*0.16;
+  let halfBarb=units%2;
+  const barbLen=shaftLen*0.3;
+  const barbGap=shaftLen*0.13;
   const barbAngle=goingTo+125;
   const rad=barbAngle*Math.PI/180;
-  let pos=shaftLen;
+  let pos=half;
   function barbEnd(p,len){
     const base=polarPoint(cx,cy,p,goingTo);
     return [base,[base[0]+len*Math.sin(rad),base[1]-len*Math.cos(rad)]];
@@ -540,9 +535,9 @@ function windBarbSVG(cx,cy,goingTo,shaftLen,speedKmh,color){
     svg+=`<line x1="${base[0].toFixed(1)}" y1="${base[1].toFixed(1)}" x2="${end[0].toFixed(1)}" y2="${end[1].toFixed(1)}" stroke="${color}" stroke-width="2"/>`;
     pos-=barbGap;
   }
-  if(half){
-    const [base,end]=barbEnd(pos,barbLen*0.5);
-    svg+=`<line x1="${base[0].toFixed(1)}" y1="${base[1].toFixed(1)}" x2="${end[0].toFixed(1)}" y2="${end[1].toFixed(1)}" stroke="${color}" stroke-width="2"/>`;
+  if(halfBarb){
+    const [base,end]=barbEnd(pos,barbLen*0.65);
+    svg+=`<line x1="${base[0].toFixed(1)}" y1="${base[1].toFixed(1)}" x2="${end[0].toFixed(1)}" y2="${end[1].toFixed(1)}" stroke="${color}" stroke-width="2.2"/>`;
   }
   return svg;
 }
@@ -567,8 +562,8 @@ function compassGlowSVG(counts,n,size,arrowAngle,speedKmh){
   }).join('');
   let arrow='';
   if(arrowAngle!==undefined&&arrowAngle!==null){
-    const goingTo=(arrowAngle+180)%360;
-    arrow=windBarbSVG(cx,cy,goingTo,rInner*0.85,speedKmh||0);
+    const goingTo=(arrowAngle)%360;
+    arrow=windBarbSVG(cx,cy,goingTo,rInner*1.7,speedKmh||0);
   }
   return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${ring}${glow}${arrow}${dots}</svg>`;
 }
@@ -1124,7 +1119,7 @@ function buildDayOverlayChart(days){
       hover:{animationDuration:0},
       responsiveAnimationDuration:0,
       plugins:{legend:{display:true,position:'top',labels:{color:'#8B98A0',boxWidth:12,font:{size:11}}},
-               tooltip:{callbacks:{
+               tooltip:{position:'nearest',callbacks:{
                  title:(items)=>{
                    if(!items.length)return '';
                    const totalH=Math.round(items[0].parsed.x);
@@ -1202,8 +1197,8 @@ function buildPressureChart(rangeDays){
       animation:false,
       hover:{animationDuration:0},
       responsiveAnimationDuration:0,
-      plugins:{legend:{display:false},zoom:ZOOM_OPTS,tooltip:{callbacks:{title:tooltipTitle24,label:(ctx)=>ctx.parsed.y.toFixed(1)+' hPa'}}},
-      scales:{x:Object.assign(timeAxis(),{min:new Date(Date.now()-rangeDays*86400000),max:new Date()}),
+      plugins:{legend:{display:false},zoom:ZOOM_OPTS,tooltip:{position:'nearest',callbacks:{title:tooltipTitle24,label:(ctx)=>ctx.parsed.y.toFixed(1)+' hPa'}}},
+      scales:{x:Object.assign(timeAxisForRange(rangeDays),{min:new Date(Date.now()-rangeDays*86400000),max:new Date()}),
               y:{ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}}
     }
   });
@@ -1263,7 +1258,7 @@ function buildWindChart(rangeDays){
     type:'line',
     data:{datasets:[
       {label:'Moyenne',data:avgPts.map(p=>({x:p.t,y:p.v})),
-       borderWidth:aggregated?2:1.2,pointRadius:aggregated?2:0,tension:0.42,_baseTension:0.42,
+       borderWidth:aggregated?2:1.2,pointRadius:0,tension:0.42,_baseTension:0.42,
        segment:{borderColor:ctx=>windIntensityColor(Math.max(ctx.p0.parsed.y,ctx.p1.parsed.y))},
        borderColor:'#E8ECEE',fill:true,
        backgroundColor:(context)=>{
@@ -1275,7 +1270,7 @@ function buildWindChart(rangeDays){
          return g;
        }},
       {label:'Rafale',data:gustPts.map(p=>({x:p.t,y:p.v})),
-       borderWidth:aggregated?2:1.2,pointRadius:aggregated?2:0,borderDash:[5,4],tension:0.42,_baseTension:0.42,
+       borderWidth:aggregated?2:1.2,pointRadius:0,borderDash:[5,4],tension:0.42,_baseTension:0.42,
        segment:{borderColor:ctx=>windIntensityColor(Math.max(ctx.p0.parsed.y,ctx.p1.parsed.y))},
        borderColor:'#E8ECEE',fill:false}
     ].filter(s=>s.data.length>0)},
@@ -1286,7 +1281,7 @@ function buildWindChart(rangeDays){
       animation:false,
       hover:{animationDuration:0},
       responsiveAnimationDuration:0,
-      plugins:{legend:{display:false},zoom:ZOOM_OPTS,tooltip:{callbacks:{
+      plugins:{legend:{display:false},zoom:ZOOM_OPTS,tooltip:{position:'nearest',callbacks:{
         title:tooltipTitle24,
         label:(ctx)=>{
           const base=(ctx.dataset.label||'')+': '+ctx.parsed.y.toFixed(1)+' km/h';
@@ -1298,7 +1293,7 @@ function buildWindChart(rangeDays){
         },
         labelColor:(ctx)=>{const c=windIntensityColor(ctx.parsed.y);return {borderColor:c,backgroundColor:c};}
       }}},
-      scales:{x:Object.assign(timeAxis(),{min:new Date(Date.now()-rangeDays*86400000),max:new Date()}),
+      scales:{x:Object.assign(timeAxisForRange(rangeDays),{min:new Date(Date.now()-rangeDays*86400000),max:new Date()}),
               y:{ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}}
     },
     plugins:[directionArrows]
@@ -1380,48 +1375,64 @@ function buildCalendarSection(rows){
     document.getElementById('calSelected').textContent='Touche une case pour voir sa valeur.';
     const rowsWrap=document.getElementById('calRows');
     rowsWrap.innerHTML='';
-    let prevYear=null;
+    const currentYear=new Date().getFullYear().toString();
+    const byYear={};
     monthKeys.forEach(mk=>{
-      const [y,m]=mk.split('-');
-      if(prevYear!==null&&y!==prevYear){
-        const sep=document.createElement('div');
-        sep.style.borderTop='1px dashed rgba(232,236,238,0.4)';
-        sep.style.margin='6px 0';
-        rowsWrap.appendChild(sep);
-      }
-      prevYear=y;
-      const row=document.createElement('div');
-      row.className='cal-row';
-      const label=document.createElement('div');
-      label.className='month-label';
-      label.textContent=monthNames[parseInt(m,10)-1]+' '+y;
-      row.appendChild(label);
-      const daysWrap=document.createElement('div');
-      daysWrap.className='days';
-      byMonth[mk].forEach(k=>{
-        const v=dayStats[k]?dayStats[k][metricKey]:null;
-        const cell=document.createElement('div');
-        cell.className='cal-day';
-        const dateFmt=new Date(k+'T12:00:00Z').toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short',year:'numeric'});
-        cell.title=dateFmt;
-        if(v!==null&&v!==undefined){
-          if(cfg.diverging){
-            cell.style.background=tempZoneColor(v);
-          }else{
-            const norm=vmax>vmin?(v-vmin)/(vmax-vmin):0.5;
-            cell.style.background=mix(cfg.ramp[0],cfg.ramp[1],norm);
-          }
-          cell.style.cursor='pointer';
-          const unit=metricKey==='windAvg'?'km/h':'°C';
-          cell.title=dateFmt+' — '+v.toFixed(1)+unit;
-          cell.addEventListener('click',()=>{
-            document.getElementById('calSelected').innerHTML=`<b>${dateFmt}</b> — ${cfg.label} : <b>${v.toFixed(1)}${unit}</b>`;
-          });
-        }
-        daysWrap.appendChild(cell);
+      const y=mk.split('-')[0];
+      (byYear[y]=byYear[y]||[]).push(mk);
+    });
+    Object.keys(byYear).sort().forEach(y=>{
+      const isCurrent=y===currentYear;
+      const yearBlock=document.createElement('div');
+      yearBlock.style.marginBottom='8px';
+      const header=document.createElement('div');
+      header.textContent=(isCurrent?'▾ ':'▸ ')+y;
+      header.style.cssText='cursor:pointer;font-size:12px;color:var(--text-muted);font-family:JetBrains Mono,monospace;padding:4px 0;';
+      const monthsWrap=document.createElement('div');
+      monthsWrap.style.display=isCurrent?'block':'none';
+      header.addEventListener('click',()=>{
+        const open=monthsWrap.style.display!=='none';
+        monthsWrap.style.display=open?'none':'block';
+        header.textContent=(open?'▸ ':'▾ ')+y;
       });
-      row.appendChild(daysWrap);
-      rowsWrap.appendChild(row);
+      byYear[y].forEach(mk=>{
+        const [yy,m]=mk.split('-');
+        const row=document.createElement('div');
+        row.className='cal-row';
+        const label=document.createElement('div');
+        label.className='month-label';
+        label.textContent=monthNames[parseInt(m,10)-1]+' '+yy;
+        row.appendChild(label);
+        const daysWrap=document.createElement('div');
+        daysWrap.className='days';
+        byMonth[mk].forEach(k=>{
+          const v=dayStats[k]?dayStats[k][metricKey]:null;
+          const cell=document.createElement('div');
+          cell.className='cal-day';
+          const dateFmt=new Date(k+'T12:00:00Z').toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short',year:'numeric'});
+          cell.title=dateFmt;
+          if(v!==null&&v!==undefined){
+            if(cfg.diverging){
+              cell.style.background=tempZoneColor(v);
+            }else{
+              const norm=vmax>vmin?(v-vmin)/(vmax-vmin):0.5;
+              cell.style.background=mix(cfg.ramp[0],cfg.ramp[1],norm);
+            }
+            cell.style.cursor='pointer';
+            const unit=metricKey==='windAvg'?'km/h':'°C';
+            cell.title=dateFmt+' — '+v.toFixed(1)+unit;
+            cell.addEventListener('click',()=>{
+              document.getElementById('calSelected').innerHTML=`<b>${dateFmt}</b> — ${cfg.label} : <b>${v.toFixed(1)}${unit}</b>`;
+            });
+          }
+          daysWrap.appendChild(cell);
+        });
+        row.appendChild(daysWrap);
+        monthsWrap.appendChild(row);
+      });
+      yearBlock.appendChild(header);
+      yearBlock.appendChild(monthsWrap);
+      rowsWrap.appendChild(yearBlock);
     });
   }
   document.querySelectorAll('#calTabs button').forEach(b=>{
@@ -1696,7 +1707,7 @@ function buildTempCompareChart(rangeDays){
       hover:{animationDuration:0},
       responsiveAnimationDuration:0,
       plugins:{legend:{display:false},zoom:ZOOM_OPTS,
-        tooltip:{filter:(item)=>item.datasetIndex>=2,
+        tooltip:{position:'nearest',filter:(item)=>item.datasetIndex>=2,
           callbacks:{title:tooltipTitle24,
             label:(ctx)=>{
               if(ctx.datasetIndex===4)return 'Écart : '+(ctx.parsed.y>=0?'+':'')+ctx.parsed.y.toFixed(1)+'°C';
@@ -1704,8 +1715,8 @@ function buildTempCompareChart(rangeDays){
             },
             labelTextColor:(ctx)=>ctx.datasetIndex===4?(ctx.parsed.y>=0?'#D64545':'#3E7CD6'):'#E8ECEE'
           }}},
-      scales:{x:Object.assign(timeAxis(),{min:new Date(Date.now()-rangeDays*86400000),max:new Date(),
-                ticks:Object.assign({},timeAxis().ticks,{maxTicksLimit:24,callback:function(value,index,ticks){
+      scales:{x:Object.assign(timeAxisForRange(rangeDays),{min:new Date(Date.now()-rangeDays*86400000),max:new Date(),
+                ticks:Object.assign({},timeAxisForRange(rangeDays).ticks,{maxTicksLimit:24,callback:function(value,index,ticks){
                   if(index===ticks.length-1)return '';
                   return this.getLabelForValue(value);
                 }})}),
@@ -2192,8 +2203,8 @@ function buildDashboard(rows){
       animation:false,
       hover:{animationDuration:0},
       responsiveAnimationDuration:0,
-        plugins:{legend:{display:false},zoom:ZOOM_OPTS,tooltip:{enabled:true,callbacks:{title:tooltipTitle24,label:(ctx)=>(ctx.dataset.label||'')+': '+ctx.parsed.y+unit}}},
-        scales:{x:Object.assign(timeAxis(),{min:new Date(Date.now()-rangeDays*86400000),max:new Date()}),
+        plugins:{legend:{display:false},zoom:ZOOM_OPTS,tooltip:{position:'nearest',enabled:true,callbacks:{title:tooltipTitle24,label:(ctx)=>(ctx.dataset.label||'')+': '+ctx.parsed.y+unit}}},
+        scales:{x:Object.assign(timeAxisForRange(rangeDays),{min:new Date(Date.now()-rangeDays*86400000),max:new Date()}),
                 y:{ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}}
       }
     });
