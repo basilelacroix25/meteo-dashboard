@@ -166,35 +166,6 @@ const crosshairPlugin={
 };
 if(window.Chart){ Chart.register(crosshairPlugin); }
 
-const midnightLinesPlugin={
-  id:'midnightLines',
-  beforeDatasetsDraw(chart){
-    if(chart.config.type!=='line')return;
-    const xs=chart.scales&&chart.scales.x;
-    if(!xs||xs.type!=='time')return;
-    const min=xs.min, max=xs.max;
-    if(min==null||max==null)return;
-    const spanDays=(max-min)/86400000;
-    if(spanDays>32)return;
-    const {ctx,chartArea}=chart;
-    let d=new Date(min); d.setHours(0,0,0,0);
-    if(d.getTime()<min) d=new Date(d.getTime()+86400000);
-    ctx.save();
-    ctx.strokeStyle='rgba(232,236,238,0.35)';
-    ctx.lineWidth=1;
-    let guard=0;
-    while(d.getTime()<=max&&guard<60){
-      const x=xs.getPixelForValue(d.getTime());
-      if(x>=chartArea.left&&x<=chartArea.right){
-        ctx.beginPath();ctx.moveTo(x,chartArea.top);ctx.lineTo(x,chartArea.bottom);ctx.stroke();
-      }
-      d=new Date(d.getTime()+86400000);
-      guard++;
-    }
-    ctx.restore();
-  }
-};
-if(window.Chart){ Chart.register(midnightLinesPlugin); }
 
 function mix3(a,b,k){return 'rgb('+a.map((v,i)=>Math.round(v+(b[i]-v)*k)).join(',')+')';}
 function gradientColor(t){
@@ -221,16 +192,21 @@ function timeAxis(){
   return {type:'time',
     time:{displayFormats:{minute:'HH:mm',hour:'HH:mm',day:'dd/MM',week:'dd/MM',month:'MM/yyyy',quarter:'MM/yyyy',year:'yyyy'},tooltipFormat:'dd/MM HH:mm'},
     ticks:{color:'#8B98A0',maxRotation:45,minRotation:45},
-    grid:{color:'#262F35'}};
+    grid:{color:(ctx)=>{
+      if(!ctx.tick||ctx.tick.value==null)return '#262F35';
+      return new Date(ctx.tick.value).getHours()===0?'rgba(232,236,238,0.4)':'#262F35';
+    }}};
 }
 function timeAxisForRange(rangeDays){
   const base=timeAxis();
   if(rangeDays===1){
     base.time.unit='hour'; base.time.stepSize=3;
     base.time.displayFormats.hour='HH:mm';
+    base.ticks.autoSkip=false;
   }else if(rangeDays===7){
     base.time.unit='hour'; base.time.stepSize=6;
     base.time.displayFormats.hour='HH:mm';
+    base.ticks.autoSkip=false;
   }else if(rangeDays<=90){
     base.time.unit='day'; base.time.stepSize=rangeDays===30?2:7;
     base.time.displayFormats.day='dd/MM';
@@ -589,8 +565,8 @@ function compassGlowSVG(counts,n,size,arrowAngle,speedKmh){
   }).join('');
   let arrow='';
   if(arrowAngle!==undefined&&arrowAngle!==null){
-    const goingTo=arrowAngle%360;
-    arrow=windBarbSVG(cx,cy,goingTo,rInner*1.7,speedKmh||0);
+    const goingTo=(arrowAngle+180)%360;
+    arrow=windBarbSVG(cx,cy,goingTo,rInner*1.35,speedKmh||0);
   }
   return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${ring}${glow}${arrow}${dots}</svg>`;
 }
@@ -1582,7 +1558,7 @@ function buildWeeklyProfileHeatmap(rows){
         let bg='#20272d', title=weekdaysFull[wd]+' '+h+'h : pas de données', style='';
         if(v!==null){
           const norm=vmax>vmin?(v-vmin)/(vmax-vmin):0.5;
-          bg=mix('1B2329',ramp,norm);
+          bg=curMetric==='CO2'?gradientColor(norm):mix('1B2329',ramp,norm);
           title=weekdaysFull[wd]+' '+h+'h : '+Math.round(v)+metricUnit[curMetric]+(interpolated?' (estimé)':'');
           if(interpolated)style='opacity:0.55;outline:1px dashed rgba(232,236,238,0.25);outline-offset:-1px;';
         }
@@ -1591,7 +1567,8 @@ function buildWeeklyProfileHeatmap(rows){
       rowsHtml+=`<div class="cal-row"><div class="month-label" style="width:30px;">${weekdaysFull[wd]}</div><div class="days">${cellsHtml}</div></div>`;
     });
     wrap.innerHTML=rowsHtml;
-    scale.innerHTML=`<span>${Math.round(vmin)}${metricUnit[curMetric]}</span><div class="grad" style="background:linear-gradient(to right,#1B2329,${mix('1B2329',ramp,1)})"></div><span>${Math.round(vmax)}${metricUnit[curMetric]}</span>`;
+    const gradCss=curMetric==='CO2'?'linear-gradient(to right,#3fae56,#e0b23d,#d64545)':`linear-gradient(to right,#1B2329,${mix('1B2329',ramp,1)})`;
+    scale.innerHTML=`<span>${Math.round(vmin)}${metricUnit[curMetric]}</span><div class="grad" style="background:${gradCss}"></div><span>${Math.round(vmax)}${metricUnit[curMetric]}</span>`;
   }
 
   document.querySelectorAll('#weeklyRoomTabs button').forEach(b=>{
@@ -1678,6 +1655,11 @@ function buildTempCompareChart(rangeDays){
   const extData=combined.map(c=>({x:c.t,y:c.ext}));
   const showLabels=rangeDays<=30;
   const peaks=showLabels?findGapPeaks(combined):[];
+
+  const viewCutoff=new Date(Date.now()-rangeDays*86400000);
+  const visibleVals=combined.filter(c=>c.t>=viewCutoff).flatMap(c=>[c.ext,c.sej]);
+  const yMin=visibleVals.length?Math.min(...visibleVals)-1:undefined;
+  const yMax=visibleVals.length?Math.max(...visibleVals)+1:undefined;
 
   const periodCutoff=new Date(Date.now()-rangeDays*86400000);
   const periodSej=sejPts.filter(p=>p.t>=periodCutoff).map(p=>p.v);
@@ -1768,7 +1750,7 @@ function buildTempCompareChart(rangeDays){
                   if(index===ticks.length-1)return '';
                   return this.getLabelForValue(value);
                 }})}),
-              y:{ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}}
+              y:{min:yMin,max:yMax,ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}}
     },
     plugins:[gapLabels]
   });
