@@ -1104,10 +1104,10 @@ function smoothedRates(pts,windowH){
   });
 }
 function buildPressureChart(rangeDays){
-  const cutoff=new Date(Date.now()-rangeDays*86400000);
   const aggregated=rangeDays>7;
-  let pts=(byRoomMetric['Séjour|Pressure']||[]).filter(p=>p.t>=cutoff).sort((a,b)=>a.t-b.t);
+  let pts=(byRoomMetric['Séjour|Pressure']||[]).sort((a,b)=>a.t-b.t);
   if(aggregated)pts=aggregateDaily(pts,'avg');
+  else pts=pts.filter(p=>p.t>=new Date(Date.now()-60*86400000));
   const rates=smoothedRates(pts,aggregated?72:3);
   const dataset={
     label:'Pression',
@@ -1129,22 +1129,26 @@ function buildPressureChart(rangeDays){
       hover:{animationDuration:0},
       responsiveAnimationDuration:0,
       plugins:{legend:{display:false},zoom:ZOOM_OPTS,tooltip:{callbacks:{title:tooltipTitle24,label:(ctx)=>ctx.parsed.y.toFixed(1)+' hPa'}}},
-      scales:{x:timeAxis(),
+      scales:{x:Object.assign(timeAxis(),{min:new Date(Date.now()-rangeDays*86400000),max:new Date()}),
               y:{ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}}
     }
   });
 }
 
 function buildWindChart(rangeDays){
-  const cutoff=new Date(Date.now()-rangeDays*86400000);
-  let avgPts=(byRoomMetric['Anémomètre|WindStrength']||[]).filter(p=>p.t>=cutoff);
-  let gustPts=(byRoomMetric['Anémomètre|GustStrength']||[]).filter(p=>p.t>=cutoff);
-  let anglePts=(byRoomMetric['Anémomètre|WindAngle']||[]).filter(p=>p.t>=cutoff);
   const aggregated=rangeDays>7;
+  const rawCutoff=new Date(Date.now()-60*86400000);
+  let avgPts=byRoomMetric['Anémomètre|WindStrength']||[];
+  let gustPts=byRoomMetric['Anémomètre|GustStrength']||[];
+  let anglePts=byRoomMetric['Anémomètre|WindAngle']||[];
   if(aggregated){
     avgPts=aggregateDaily(avgPts,'avg');
     gustPts=aggregateDaily(gustPts,'max');
     anglePts=aggregateDaily(anglePts,'last');
+  }else{
+    avgPts=avgPts.filter(p=>p.t>=rawCutoff);
+    gustPts=gustPts.filter(p=>p.t>=rawCutoff);
+    anglePts=anglePts.filter(p=>p.t>=rawCutoff);
   }
   function nearestV(pts,t){
     let best=null,bd=Infinity;
@@ -1220,7 +1224,7 @@ function buildWindChart(rangeDays){
         },
         labelColor:(ctx)=>{const c=windIntensityColor(ctx.parsed.y);return {borderColor:c,backgroundColor:c};}
       }}},
-      scales:{x:timeAxis(),
+      scales:{x:Object.assign(timeAxis(),{min:new Date(Date.now()-rangeDays*86400000),max:new Date()}),
               y:{ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}}
     },
     plugins:[directionArrows]
@@ -1228,10 +1232,10 @@ function buildWindChart(rangeDays){
 }
 
 const CAL_METRICS={
-  tempMax:{label:'Temp. max (Extérieur)',ramp:['1B2329','E8A33D']},
-  tempMin:{label:'Temp. min (Extérieur)',ramp:['1B2329','3E7CD6']},
-  sejMax:{label:'Séjour max',ramp:['1B2329','D64545']},
-  sejMin:{label:'Séjour min',ramp:['1B2329','3E7CD6']},
+  tempMax:{label:'Temp. max (Extérieur)',ramp:['1B2329','8B98A0'],diverging:true},
+  tempMin:{label:'Temp. min (Extérieur)',ramp:['1B2329','8B98A0'],diverging:true},
+  sejMax:{label:'Séjour max',ramp:['1B2329','8B98A0'],diverging:true},
+  sejMin:{label:'Séjour min',ramp:['1B2329','8B98A0'],diverging:true},
   windAvg:{label:'Vent moyen',ramp:['1B2329','8B98A0']}
 };
 function buildCalendarSection(rows){
@@ -1292,7 +1296,13 @@ function buildCalendarSection(rows){
     const vmin=Math.min(...vals), vmax=Math.max(...vals);
     document.getElementById('calScaleLo').textContent=vmin.toFixed(1);
     document.getElementById('calScaleHi').textContent=vmax.toFixed(1);
-    document.getElementById('calGrad').style.background=`linear-gradient(to right,#${cfg.ramp[0]},${mix(cfg.ramp[0],cfg.ramp[1],1)})`;
+    if(cfg.diverging){
+      document.getElementById('calGrad').style.background='linear-gradient(to right,#3E7CD6,#E8ECEE,#D64545)';
+      document.getElementById('calScaleLo').textContent='froid';
+      document.getElementById('calScaleHi').textContent='chaud';
+    }else{
+      document.getElementById('calGrad').style.background=`linear-gradient(to right,#${cfg.ramp[0]},${mix(cfg.ramp[0],cfg.ramp[1],1)})`;
+    }
     document.getElementById('calSelected').textContent='Touche une case pour voir sa valeur.';
     const rowsWrap=document.getElementById('calRows');
     rowsWrap.innerHTML='';
@@ -1321,8 +1331,12 @@ function buildCalendarSection(rows){
         const dateFmt=new Date(k+'T12:00:00Z').toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short',year:'numeric'});
         cell.title=dateFmt;
         if(v!==null&&v!==undefined){
-          const norm=vmax>vmin?(v-vmin)/(vmax-vmin):0.5;
-          cell.style.background=mix(cfg.ramp[0],cfg.ramp[1],norm);
+          if(cfg.diverging){
+            cell.style.background=tempZoneColor(v);
+          }else{
+            const norm=vmax>vmin?(v-vmin)/(vmax-vmin):0.5;
+            cell.style.background=mix(cfg.ramp[0],cfg.ramp[1],norm);
+          }
           cell.style.cursor='pointer';
           const unit=metricKey==='windAvg'?'km/h':'°C';
           cell.title=dateFmt+' — '+v.toFixed(1)+unit;
@@ -1408,7 +1422,7 @@ function buildWeeklyProfileHeatmap(rows){
     const interpFlags=[];
     const filledGrid=avgGrid.map(row=>{
       const {out,wasNull}=interpolateRowCircular(row);
-      const smoothedOut=smoothCircular(out,1);
+      const smoothedOut=smoothCircular(out,3);
       interpFlags.push(wasNull);
       return smoothedOut;
     });
@@ -1506,13 +1520,16 @@ function findGapPeaks(combined){
 }
 
 function buildTempCompareChart(rangeDays){
-  const cutoff=new Date(Date.now()-rangeDays*86400000);
   const aggregated=rangeDays>7;
-  let extPts=(byRoomMetric['Extérieur|Temperature']||[]).filter(p=>p.t>=cutoff).sort((a,b)=>a.t-b.t);
-  let sejPts=(byRoomMetric['Séjour|Temperature']||[]).filter(p=>p.t>=cutoff).sort((a,b)=>a.t-b.t);
+  let extPts=(byRoomMetric['Extérieur|Temperature']||[]).sort((a,b)=>a.t-b.t);
+  let sejPts=(byRoomMetric['Séjour|Temperature']||[]).sort((a,b)=>a.t-b.t);
   if(aggregated){
     extPts=aggregateDaily(extPts,'avg');
     sejPts=aggregateDaily(sejPts,'avg');
+  }else{
+    const rawCutoff=new Date(Date.now()-60*86400000);
+    extPts=extPts.filter(p=>p.t>=rawCutoff);
+    sejPts=sejPts.filter(p=>p.t>=rawCutoff);
   }
   function nearestVal(pts,t){
     let best=null,bd=Infinity;
@@ -1602,7 +1619,7 @@ function buildTempCompareChart(rangeDays){
             },
             labelTextColor:(ctx)=>ctx.datasetIndex===4?(ctx.parsed.y>=0?'#D64545':'#3E7CD6'):'#E8ECEE'
           }}},
-      scales:{x:timeAxis(),
+      scales:{x:Object.assign(timeAxis(),{min:new Date(Date.now()-rangeDays*86400000),max:new Date()}),
               y:{ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}}
     },
     plugins:[gapLabels]
@@ -1868,11 +1885,12 @@ function buildRecordsSection(rows){
   function render(year){
     const records=computeRecords(rows,year);
     const wrap=document.getElementById('recordsRows');
+    const medalColors=['#D4AF37','#C0C0C0','#CD7F32'];
     wrap.innerHTML=`<div class="card" style="max-width:480px;">${records.filter(r=>r.value!==null).map((r,i)=>{
       const dateFmt=r.date.toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'});
       const rank=allTimeTop3ByMetric[i].indexOf(r.ts);
-      const medal=rank===0?'🥇 ':rank===1?'🥈 ':rank===2?'🥉 ':'';
-      return `<div class="metric-row"><span class="metric-label">${medal}${r.label}</span><span class="metric-value">${r.value.toFixed(1)}${r.unit} <span style="color:var(--text-muted);font-size:10px;">(${dateFmt})</span></span></div>`;
+      const dot=rank>=0?`<span class="pastille" style="background:${medalColors[rank]}"></span>`:'';
+      return `<div class="metric-row"><span class="metric-label">${r.label}</span><span class="metric-value">${dot}${r.value.toFixed(1)}${r.unit} <span style="color:var(--text-muted);font-size:10px;">(${dateFmt})</span></span></div>`;
     }).join('')}</div>`;
   }
   document.querySelectorAll('#recordsTabs button').forEach(b=>{
@@ -2015,18 +2033,19 @@ function buildDashboard(rows){
   });
 
   function seriesFor(metric,rangeDays){
-    const cutoff=new Date(Date.now()-rangeDays*86400000);
     const aggregated=rangeDays>7;
+    const rawWindowCutoff=new Date(Date.now()-60*86400000);
     return rooms.map(room=>{
       const key=room+'|'+metric;
-      let pts=(byRoomMetric[key]||[]).filter(p=>p.t>=cutoff);
+      let pts=byRoomMetric[key]||[];
       if(aggregated)pts=aggregateDaily(pts,'avg');
+      else pts=pts.filter(p=>p.t>=rawWindowCutoff);
       return {label:room,data:pts.map(p=>({x:p.t,y:p.v})),borderColor:colorFor(room),backgroundColor:colorFor(room),borderWidth:2,pointRadius:0,tension:0.42,_baseTension:0.42};
     }).filter(s=>s.data.length>0);
   }
 
   let charts={};
-  function makeChart(id,dataset,unit){
+  function makeChart(id,dataset,unit,rangeDays){
     if(charts[id])charts[id].destroy();
     charts[id]=new Chart(document.getElementById(id),{
       type:'line',
@@ -2038,7 +2057,7 @@ function buildDashboard(rows){
       hover:{animationDuration:0},
       responsiveAnimationDuration:0,
         plugins:{legend:{display:false},zoom:ZOOM_OPTS,tooltip:{enabled:true,callbacks:{title:tooltipTitle24,label:(ctx)=>(ctx.dataset.label||'')+': '+ctx.parsed.y+unit}}},
-        scales:{x:timeAxis(),
+        scales:{x:Object.assign(timeAxis(),{min:new Date(Date.now()-rangeDays*86400000),max:new Date()}),
                 y:{ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}}
       }
     });
@@ -2048,10 +2067,10 @@ function buildDashboard(rows){
   function render(range){
     const d=rangeDays[range];
     syncedCharts=[];
-    makeChart('tempChart',seriesFor('Temperature',d),'°C');
-    makeChart('humChart',seriesFor('Humidity',d),'%');
-    makeChart('co2Chart',seriesFor('CO2',d),' ppm');
-    makeChart('noiseChart',seriesFor('Noise',d),' dB');
+    makeChart('tempChart',seriesFor('Temperature',d),'°C',d);
+    makeChart('humChart',seriesFor('Humidity',d),'%',d);
+    makeChart('co2Chart',seriesFor('CO2',d),' ppm',d);
+    makeChart('noiseChart',seriesFor('Noise',d),' dB',d);
     if(charts['pressureChart'])charts['pressureChart'].destroy();
     charts['pressureChart']=buildPressureChart(d);
     if(charts['tempCompareChart'])charts['tempCompareChart'].destroy();
