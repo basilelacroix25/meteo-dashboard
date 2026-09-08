@@ -36,7 +36,7 @@ h2{font-family:'Fraunces',serif;font-weight:500;font-size:1.15rem;margin:2.5rem 
 .trend{display:inline-block;width:16px;text-align:center;margin-left:6px;color:var(--text-muted);flex-shrink:0;}
 .trend.up{color:#D64545;}
 .trend.down{color:#3E7CD6;}
-.minmax-italic{font-style:italic;font-size:11px;color:var(--text-muted);margin:-3px 0 4px;}
+.minmax-italic{font-style:italic;font-size:11px;color:var(--text-muted);margin:-3px 0 4px;text-align:right;}
 .ext-card .wind-block{display:flex;align-items:center;gap:14px;margin-top:8px;border-top:1px solid var(--border);padding-top:10px;}
 .rose-combo{width:96px;height:96px;flex-shrink:0;}
 .wind-text{font-size:12px;color:var(--text-muted);}
@@ -283,7 +283,8 @@ function buildRoseSVG(values,n,size,opts){
   const cx=size/2, cy=size/2;
   const margin=opts.margin!==undefined?opts.margin:18;
   const maxR=size/2-margin;
-  const vmax=Math.max(...values,0.001);
+  const gustValues=opts.gustValues;
+  const vmax=Math.max(...values,...(gustValues||[]),0.001);
   const step=360/n;
   let bars='';
   for(let i=0;i<n;i++){
@@ -291,7 +292,17 @@ function buildRoseSVG(values,n,size,opts){
     const a0=angle-step/2, a1=angle+step/2;
     const r=Math.max(2,(values[i]/vmax)*maxR);
     const clickAttr=opts.captionId?` onclick="handleRoseClick(this)" data-dir="${compassLabel(angle)}" data-value="${values[i]}" data-caption="${opts.captionId}" style="cursor:pointer"`:'';
-    bars+=`<path d="${wedgePath(cx,cy,0,r,a0,a1)}" fill="rgba(184,192,198,0.55)" stroke="#E8ECEE" stroke-width="0.6"${clickAttr}><title>${compassLabel(angle)} : ${values[i]} km/h</title></path>`;
+    bars+=`<path d="${wedgePath(cx,cy,0,r,a0,a1)}" fill="rgba(184,192,198,0.55)" stroke="#E8ECEE" stroke-width="0.6"${clickAttr}><title>${compassLabel(angle)} : ${values[i]} km/h${gustValues?' (rafale '+gustValues[i]+' km/h)':''}</title></path>`;
+  }
+  let gustDots='';
+  if(gustValues){
+    for(let i=0;i<n;i++){
+      if(!gustValues[i])continue;
+      const angle=i*step;
+      const gr=Math.max(2,(gustValues[i]/vmax)*maxR);
+      const [gx,gy]=polarPoint(cx,cy,gr,angle);
+      gustDots+=`<circle cx="${gx.toFixed(1)}" cy="${gy.toFixed(1)}" r="2.5" fill="#E8A33D" stroke="#0E1418" stroke-width="0.6"><title>${compassLabel(angle)} rafale : ${gustValues[i]} km/h</title></circle>`;
+    }
   }
   let grids='';
   if(opts.grid!==false){
@@ -317,7 +328,7 @@ function buildRoseSVG(values,n,size,opts){
     const wingR=polarPoint(cx,cy,maxR*0.78,goingTo+9);
     arrow+=`<polygon points="${tip[0]},${tip[1]} ${wingL[0]},${wingL[1]} ${wingR[0]},${wingR[1]}" fill="#E8ECEE"/>`;
   }
-  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${grids}${bars}${arrow}${labels}</svg>`;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${grids}${bars}${gustDots}${arrow}${labels}</svg>`;
 }
 
 function handleRoseClick(el){
@@ -407,15 +418,14 @@ function detectRecentAeration(room){
 function aerationFooter(room,m,ext){
   const level=aerationVerdict(m.CO2,m.Humidity);
   const label=['Pas nécessaire','Aérer conseillé','Aérer maintenant'][level];
-  const color=gradientColor(level/2);
+  const style=level>0?`style="color:${gradientColor(level/2)};"`:'';
   const tempDiff=(m.Temperature!==undefined&&ext.Temperature!==undefined)?(m.Temperature-ext.Temperature):null;
   const aeration=detectRecentAeration(room);
   const hh=aeration?aeration.t.getHours().toString().padStart(2,'0')+':'+aeration.t.getMinutes().toString().padStart(2,'0'):'';
   return `<div style="margin-top:auto;padding-top:8px;">
     <div class="metric-row">
-      <span class="metric-label">Aération</span>
-      <span class="metric-value" style="font-size:12px;">${label}</span>
-      <span class="pastille" style="background:${color}"></span>
+      <span class="metric-label" ${style}>Aération</span>
+      <span class="metric-value" ${style} style="font-size:12px;">${label}</span>
     </div>
     ${tempDiff!==null?`<p class="minmax-italic">écart extérieur ${tempDiff>0?'+':''}${tempDiff.toFixed(1)}°C</p>`:''}
     ${aeration?`<p class="minmax-italic" style="color:#3FAE56;">aération détectée à ${hh}&nbsp;(${Math.round(aeration.from)}→${Math.round(aeration.to)}&nbsp;ppm, ~${aeration.durationMin}&nbsp;min)</p>`:''}
@@ -771,10 +781,12 @@ function buildWindRose7d(rangeDays,periodLabel){
     return;
   }
   const speedPts=byRoomMetric['Anémomètre|WindStrength']||[];
+  const gustPts=byRoomMetric['Anémomètre|GustStrength']||[];
   const values=computeWindBins(anglePts,speedPts,16);
+  const gustValues=computeWindBins(anglePts,gustPts,16);
   slot.innerHTML=`
-    <p class="insight-caption" id="roseCaption7d">Rose des vents — moyenne sur ${periodLabel}. Touche un secteur pour voir sa valeur.</p>
-    <div class="rosewrap" style="display:flex;align-items:center;justify-content:center;">${buildRoseSVG(values,16,220,{grid:true,labels:true,captionId:'roseCaption7d'})}</div>
+    <p class="insight-caption" id="roseCaption7d">Rose des vents — moyenne sur ${periodLabel}. Point orange = rafale. Touche un secteur pour voir sa valeur.</p>
+    <div class="rosewrap" style="display:flex;align-items:center;justify-content:center;">${buildRoseSVG(values,16,220,{grid:true,labels:true,captionId:'roseCaption7d',gustValues})}</div>
   `;
 }
 function buildWindRoses(rangeDays){
@@ -952,7 +964,7 @@ function buildComfortRadar(rangeDays){
   return new Chart(canvas,{
     type:'radar',
     data:{labels:RADAR_METRICS.map(m=>m.label),datasets:[
-      {label:'Période précédente',data:prevVals,borderColor:'rgba(232,236,238,0.5)',borderDash:[5,4],backgroundColor:'transparent',pointRadius:0,borderWidth:1.5},
+      {label:'Période précédente',data:prevVals,borderColor:'#E8ECEE',borderDash:[5,4],backgroundColor:'transparent',pointRadius:0,borderWidth:1.5},
       {label:'Période actuelle',data:curVals,borderColor:'#E8ECEE',backgroundColor:'rgba(232,236,238,0.22)',pointRadius:0,borderWidth:2}
     ]},
     options:{
@@ -1405,7 +1417,6 @@ function buildWeeklyProfileHeatmap(rows){
       <div class="tabs" id="weeklyMetricTabs"><button data-metric="CO2">CO2</button><button data-metric="Noise">Bruit</button></div>
       <div id="weeklyHeatWrap"></div>
       <div class="scale" id="weeklyScale"></div>
-      <p class="hint" id="weeklyInterpNote"></p>
     </div>
   `);
 
@@ -1436,7 +1447,7 @@ function buildWeeklyProfileHeatmap(rows){
     }
     const vmin=Math.min(...allVals), vmax=Math.max(...allVals);
     const ramp=metricRamp[curMetric];
-    let hourHeader='<div class="cal-row"><div class="month-label"></div><div class="days">';
+    let hourHeader='<div class="cal-row"><div class="month-label" style="width:30px;"></div><div class="days">';
     for(let h=0;h<24;h++){
       hourHeader+=`<div style="width:9px;flex-shrink:0;font-size:8px;color:var(--text-muted);text-align:center;">${h%6===0?h:''}</div>`;
     }
@@ -1456,11 +1467,10 @@ function buildWeeklyProfileHeatmap(rows){
         }
         cellsHtml+=`<div class="cal-day" title="${title}" style="background:${bg};${style}"></div>`;
       }
-      rowsHtml+=`<div class="cal-row"><div class="month-label">${weekdaysFull[wd]}</div><div class="days">${cellsHtml}</div></div>`;
+      rowsHtml+=`<div class="cal-row"><div class="month-label" style="width:30px;">${weekdaysFull[wd]}</div><div class="days">${cellsHtml}</div></div>`;
     });
     wrap.innerHTML=rowsHtml;
     scale.innerHTML=`<span>${Math.round(vmin)}${metricUnit[curMetric]}</span><div class="grad" style="background:linear-gradient(to right,#1B2329,${mix('1B2329',ramp,1)})"></div><span>${Math.round(vmax)}${metricUnit[curMetric]}</span>`;
-    document.getElementById('weeklyInterpNote').textContent=Object.values(interpFlags).some(r=>r.some(Boolean))?'Cases estompées = estimées par interpolation (données toutes les 3h pour l\'instant).':'';
   }
 
   document.querySelectorAll('#weeklyRoomTabs button').forEach(b=>{
@@ -1548,6 +1558,19 @@ function buildTempCompareChart(rangeDays){
   const showLabels=rangeDays<=30;
   const peaks=showLabels?findGapPeaks(combined):[];
 
+  const periodCutoff=new Date(Date.now()-rangeDays*86400000);
+  const periodSej=sejPts.filter(p=>p.t>=periodCutoff).map(p=>p.v);
+  const sejAvg=periodSej.length?periodSej.reduce((a,b)=>a+b,0)/periodSej.length:null;
+  const sejStd=periodSej.length>1?Math.sqrt(periodSej.reduce((a,v)=>a+Math.pow(v-sejAvg,2),0)/periodSej.length):null;
+  const stableLabel=sejStd!==null?(sejStd<0.4?'stable':sejStd<1.2?'assez stable':'instable')+' (écart-type '+sejStd.toFixed(1)+'°C)':'—';
+  const curDiff=combined.length?combined[combined.length-1].ext-combined[combined.length-1].sej:null;
+  const capEl=document.getElementById('tempCompareCaption');
+  if(capEl){
+    capEl.innerHTML=`Écart actuel : <b style="color:${curDiff===null?'#8B98A0':curDiff>=0?'#D64545':'#3E7CD6'}">${curDiff===null?'—':(curDiff>=0?'+':'')+curDiff.toFixed(1)+'°C'}</b>
+      · Séjour ${stableLabel} sur la période
+      · moyenne Séjour : <b>${sejAvg!==null?sejAvg.toFixed(1)+'°C':'—'}</b>`;
+  }
+
   const gapLabels={
     id:'gapLabels',
     afterDatasetsDraw(chart){
@@ -1626,6 +1649,27 @@ function buildTempCompareChart(rangeDays){
   });
 }
 
+function findExtrema(pts,threshold){
+  const extrema=[];
+  if(pts.length<3)return extrema;
+  let direction=null;
+  let last=pts[0];
+  for(let k=1;k<pts.length;k++){
+    const p=pts[k];
+    if(direction===null){
+      if(p.v-last.v>=threshold){extrema.push({t:last.t,v:last.v,type:'min'});direction='up';last=p;}
+      else if(last.v-p.v>=threshold){extrema.push({t:last.t,v:last.v,type:'max'});direction='down';last=p;}
+      else if(p.v>last.v||p.v<last.v)last=(direction===null&&Math.abs(p.v-last.v)<threshold)?last:p;
+    }else if(direction==='up'){
+      if(p.v>=last.v)last=p;
+      else if(last.v-p.v>=threshold){extrema.push({t:last.t,v:last.v,type:'max'});direction='down';last=p;}
+    }else{
+      if(p.v<=last.v)last=p;
+      else if(p.v-last.v>=threshold){extrema.push({t:last.t,v:last.v,type:'min'});direction='up';last=p;}
+    }
+  }
+  return extrema;
+}
 function buildTodayTimeline(){
   const today=new Date(); today.setHours(0,0,0,0);
   const events=[];
@@ -1652,10 +1696,35 @@ function buildTodayTimeline(){
   const extPts=(byRoomMetric['Extérieur|Temperature']||[]).filter(p=>p.t>=today).sort((a,b)=>a.t-b.t);
   if(extPts.length){
     events.push({t:extPts[0].t,icon:'○',text:`Extérieur ${extPts[0].v.toFixed(1)}°C`});
-    let maxP=extPts[0],minP=extPts[0];
-    extPts.forEach(p=>{if(p.v>maxP.v)maxP=p; if(p.v<minP.v)minP=p;});
-    events.push({t:maxP.t,icon:'↑',text:`Pic extérieur ${maxP.v.toFixed(1)}°C`});
+    const extrema=findExtrema(extPts,1.2);
+    extrema.forEach(e=>{
+      if(e.type==='min')events.push({t:e.t,icon:'↑',text:`Creux extérieur ${e.v.toFixed(1)}°C — ça commence à remonter`});
+      else events.push({t:e.t,icon:'↓',text:`Pic extérieur ${e.v.toFixed(1)}°C — ça commence à redescendre`});
+    });
   }
+  const pressPts=(byRoomMetric['Séjour|Pressure']||[]).filter(p=>p.t>=today).sort((a,b)=>a.t-b.t);
+  if(pressPts.length>=2){
+    let worst=null,worstRate=0;
+    for(let i=0;i<pressPts.length;i++){
+      for(let j=i+1;j<pressPts.length;j++){
+        const dtH=(pressPts[j].t-pressPts[i].t)/3600000;
+        if(dtH>2.5)break;
+        if(dtH<=0)continue;
+        const rate=(pressPts[j].v-pressPts[i].v)/dtH;
+        if(Math.abs(rate)>Math.abs(worstRate)){worstRate=rate;worst=pressPts[j];}
+      }
+    }
+    if(worst&&Math.abs(worstRate)>=1){
+      events.push({t:worst.t,icon:worstRate<0?'▽':'△',text:(worstRate<0?'Chute':'Remontée')+` de pression rapide (${worstRate>0?'+':''}${worstRate.toFixed(1)} hPa/h)`});
+    }
+  }
+  ['Séjour','Chambre'].forEach(room=>{
+    const noisePts=(byRoomMetric[room+'|Noise']||[]).filter(p=>p.t>=today);
+    if(!noisePts.length)return;
+    let maxN=noisePts[0];
+    noisePts.forEach(p=>{if(p.v>maxN.v)maxN=p;});
+    if(maxN.v>=50)events.push({t:maxN.t,icon:'◆',text:`Pic sonore ${room} ${Math.round(maxN.v)} dB`});
+  });
   const gustPts=(byRoomMetric['Anémomètre|GustStrength']||[]).filter(p=>p.t>=today);
   const angleForGust=byRoomMetric['Anémomètre|WindAngle']||[];
   if(gustPts.length){
@@ -1890,7 +1959,7 @@ function buildRecordsSection(rows){
       const dateFmt=r.date.toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'});
       const rank=allTimeTop3ByMetric[i].indexOf(r.ts);
       const dot=rank>=0?`<span class="pastille" style="background:${medalColors[rank]}"></span>`:'';
-      return `<div class="metric-row"><span class="metric-label">${r.label}</span><span class="metric-value">${dot}${r.value.toFixed(1)}${r.unit} <span style="color:var(--text-muted);font-size:10px;">(${dateFmt})</span></span></div>`;
+      return `<div class="metric-row"><span class="metric-label">${r.label}</span><span class="metric-value">${r.value.toFixed(1)}${r.unit} <span style="color:var(--text-muted);font-size:10px;">(${dateFmt})</span>${dot}</span></div>`;
     }).join('')}</div>`;
   }
   document.querySelectorAll('#recordsTabs button').forEach(b=>{
@@ -1998,7 +2067,7 @@ function buildDashboard(rows){
     <div class="chartbox">${chartWrap('tempChart','°C')}</div>
     <h2>Extérieur vs Séjour</h2>
     <div class="legend"><span><span class="dot" style="background:#E8ECEE"></span>Séjour</span><span><span class="dot" style="background:#D64545"></span>Extérieur plus chaud</span><span><span class="dot" style="background:#3E7CD6"></span>Extérieur plus froid</span></div>
-    <p class="hint">Écart maximal affiché sur chaque zone significative. Heures de passage affichées en vues Jour/Semaine.</p>
+    <p class="hint" id="tempCompareCaption"></p>
     <div class="chartbox">${chartWrap('tempCompareChart','°C')}</div>
     <h2>Humidité</h2>
     <div class="chartbox">${chartWrap('humChart','%')}</div>
