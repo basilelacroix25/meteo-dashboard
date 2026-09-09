@@ -296,13 +296,15 @@ function metricRow(module,metric,value,noPastille,humForDew){
     <span class="trend ${tr.cls}">${tr.arrow}</span>
   </div>${extra}`;
 }
-function metricRowNoAuto(metric,value){
+function metricRowNoAuto(metric,value,module){
   const unit=METRIC_UNIT[metric]||'';
   const dec=METRIC_DECIMALS[metric]!==undefined?METRIC_DECIMALS[metric]:1;
   const displayVal=(typeof value==='number')?value.toFixed(dec):value;
+  const trendHtml=module?(()=>{const tr=trendFor(module,metric);return `<span class="trend ${tr.cls}">${tr.arrow}</span>`;})():'';
   return `<div class="metric-row">
     <span class="metric-label">${METRIC_LABEL[metric]||metric}</span>
     <span class="metric-value">${displayVal}${unit}</span>
+    ${trendHtml}
   </div>`;
 }
 
@@ -523,9 +525,9 @@ function renderCards(latest){
   extCard.className='card ext-card';
   extCard.innerHTML=`
     <div class="room-title">Extérieur</div>
-    ${ext.Temperature!==undefined?metricRowNoAuto('Temperature',ext.Temperature):''}
+    ${ext.Temperature!==undefined?metricRowNoAuto('Temperature',ext.Temperature,'Extérieur'):''}
     ${tempFooterLine('Extérieur',ext.Temperature,ext.Humidity)}
-    ${ext.Humidity!==undefined?metricRowNoAuto('Humidity',ext.Humidity):''}
+    ${ext.Humidity!==undefined?metricRowNoAuto('Humidity',ext.Humidity,'Extérieur'):''}
     ${pressureSource.Pressure!==undefined?metricRowNoAuto('Pressure',pressureSource.Pressure):''}
     ${pressureSource.Pressure!==undefined?(()=>{const rate=pressureTrend();const b=pressureBadge(rate);return `<p class="minmax-italic" style="font-style:normal;text-align:right;">${b.text}${rate!==null?' ('+(rate>0?'+':'')+rate.toFixed(1)+' hPa/h)':''} <span style="color:${b.color};">${b.arrow}</span></p>`;})():''}
     <div class="wind-block">
@@ -749,7 +751,7 @@ async function buildDailyMinMaxChart(rows){
         drawWeatherIcon(ctx, weatherCategory(icons[days[i]]), bar.x, chartArea.bottom+42, 20, '#8B98A0');
         const avgY=scales.y.getPixelForValue(avgs[i]);
         ctx.beginPath();
-        ctx.arc(bar.x,avgY,3,0,Math.PI*2);
+        ctx.arc(bar.x,avgY,5,0,Math.PI*2);
         ctx.fillStyle='#0E1418';
         ctx.fill();
         ctx.lineWidth=1;
@@ -799,7 +801,7 @@ function detectWindOnsets(afterH,rangeDays){
     if(bd>maxDiffH*3600000)return null;
     return best;
   }
-  const CALM=8, BLOWING=15;
+  const CALM=6, BLOWING=11;
   let wasCalm=true;
   const onsets=[];
   speedPts.forEach(p=>{
@@ -875,7 +877,7 @@ function buildWindImpactRoses(rangeDays,periodLabel){
   const tempVals=tempSums.map((s,i)=>tempCounts[i]?s/tempCounts[i]:null);
   const humVals=humSums.map((s,i)=>humCounts[i]?s/humCounts[i]:null);
   slot.insertAdjacentHTML('beforeend',`
-    <p class="hint">Ce que le vent amène : écart de température/humidité extérieure, 2h après le début d'un coup de vent (>15 km/h), selon la direction d'où il souffle. Basé sur ${events.length} épisode${events.length>1?'s':''} détecté${events.length>1?'s':''} sur ${periodLabel}${events.length<8?' — échantillon encore faible, à prendre avec prudence':''}. Rouge = ça monte, bleu = ça descend.</p>
+    <p class="hint">Ce que le vent amène : écart de température/humidité extérieure, 2h après le début d'un coup de vent (>11 km/h), selon la direction d'où il souffle. Basé sur ${events.length} épisode${events.length>1?'s':''} détecté${events.length>1?'s':''} sur ${periodLabel}${events.length<8?' — échantillon encore faible, à prendre avec prudence':''}. Rouge = ça monte, bleu = ça descend.</p>
     <div style="display:flex;gap:10px;">
       <div style="flex:1;min-width:0;">
         <p class="insight-caption" id="roseCaptionTemp">Vent → Température</p>
@@ -1024,13 +1026,13 @@ function buildRiseFallChart(days){
 
   new Chart(document.getElementById('riseFallChart'),{
     type:'line',
-    data:{datasets:[{data:profile.map((v,h)=>({x:h,y:v})),borderColor:'#B8C0C6',borderWidth:1.5,
+    data:{datasets:[{data:profile.map((v,h)=>({x:h,y:v})),borderColor:'#E8ECEE',borderWidth:1.5,
       backgroundColor:(context)=>{
         const {ctx,chartArea}=context.chart;
-        if(!chartArea)return 'rgba(184,192,198,0.12)';
+        if(!chartArea)return 'rgba(232,236,238,0.12)';
         const g=ctx.createLinearGradient(0,chartArea.top,0,chartArea.bottom);
-        g.addColorStop(0,'rgba(184,192,198,0.28)');
-        g.addColorStop(1,'rgba(184,192,198,0)');
+        g.addColorStop(0,'rgba(232,236,238,0.28)');
+        g.addColorStop(1,'rgba(232,236,238,0)');
         return g;
       },
       fill:true,spanGaps:true,tension:0.35,pointRadius:0}]},
@@ -1620,7 +1622,7 @@ function buildWeeklyProfileHeatmap(rows){
       <h2>Profil hebdomadaire type</h2>
       <p class="hint">Moyenne par heure et jour de la semaine, sur les 30 derniers jours glissants.</p>
       <div class="tabs" id="weeklyRoomTabs">${rooms.map(r=>`<button data-room="${r}">${r}</button>`).join('')}</div>
-      <div class="tabs" id="weeklyMetricTabs"><button data-metric="CO2">CO2</button><button data-metric="Noise">Bruit</button></div>
+      <div class="tabs" id="weeklyMetricTabs"><button data-metric="CO2">CO<sub>2</sub></button><button data-metric="Noise">Bruit</button></div>
       <div id="weeklyHeatWrap"></div>
       <div class="scale" id="weeklyScale"></div>
     </div>
@@ -1895,8 +1897,8 @@ function buildTodayTimeline(){
     const pts=(byRoomMetric[room+'|CO2']||[]).filter(p=>p.t>=today).sort((a,b)=>a.t-b.t);
     let crossed1000=false, crossed1500=false;
     pts.forEach(p=>{
-      if(!crossed1000&&p.v>1000){events.push({t:p.t,icon:'▲',text:`CO2 ${room} dépasse 1000 ppm`});crossed1000=true;}
-      if(!crossed1500&&p.v>1500){events.push({t:p.t,icon:'▲',text:`CO2 ${room} dépasse 1500 ppm`});crossed1500=true;}
+      if(!crossed1000&&p.v>1000){events.push({t:p.t,icon:'▲',text:`CO<sub>2</sub> ${room} dépasse 1000 ppm`});crossed1000=true;}
+      if(!crossed1500&&p.v>1500){events.push({t:p.t,icon:'▲',text:`CO<sub>2</sub> ${room} dépasse 1500 ppm`});crossed1500=true;}
     });
     for(let i=0;i<pts.length;i++){
       let found=false;
@@ -1904,7 +1906,7 @@ function buildTodayTimeline(){
         const dtMin=(pts[j].t-pts[i].t)/60000;
         if(dtMin>60)break;
         if(pts[i].v-pts[j].v>=300){
-          events.push({t:pts[j].t,icon:'⟳',text:`Baisse rapide du CO2 ${room} (${Math.round(pts[i].v)}→${Math.round(pts[j].v)} ppm) → aération probable`});
+          events.push({t:pts[j].t,icon:'⟳',text:`Baisse rapide du CO<sub>2</sub> ${room} (${Math.round(pts[i].v)}→${Math.round(pts[j].v)} ppm) → aération probable`});
           i=j; found=true; break;
         }
       }
@@ -2044,7 +2046,7 @@ function buildNightScores(){
     const n=nights[idx];
     const dateFmt=n.start.toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short'});
     const scoreColor=nightScoreColor(n.score);
-    const co2AboveColor=gradientColor(Math.max(0,Math.min(1,n.co2Above1000/120)));
+    const co2AboveColor=n.co2Above1000<=0?'#3FAE56':n.co2Above1000<=60?'#E0B23D':n.co2Above1000<=180?'#E8A33D':'#D64545';
     document.getElementById('nightCardBody').innerHTML=`
       <div class="room-title" style="justify-content:space-between;">
         <span>☾ ${dateFmt}</span>
@@ -2052,9 +2054,9 @@ function buildNightScores(){
       </div>
       ${coloredRow('○ Température moyenne',n.tempAvg,'Temperature',1,'°C')}
       ${coloredRow('● Humidité moyenne',n.humAvg,'Humidity',0,'%')}
-      <div class="metric-row"><span class="metric-label">▲ CO2 moyen / max</span><span class="metric-value" style="${n.co2Avg!==null?'color:'+pastilleColor('CO2',n.co2Avg)+';':''}">${fmt(n.co2Avg,0,'')} / ${fmt(n.co2Max,0,' ppm')}</span></div>
+      <div class="metric-row"><span class="metric-label">▲ CO<sub>2</sub> moyen / max</span><span class="metric-value" style="${n.co2Avg!==null?'color:'+pastilleColor('CO2',n.co2Avg)+';':''}">${fmt(n.co2Avg,0,'')} / ${fmt(n.co2Max,0,' ppm')}</span></div>
       <div class="metric-row"><span class="metric-label">≈ Bruit moyen / pic</span><span class="metric-value" style="${n.noiseAvg!==null?'color:'+pastilleColor('Noise',n.noiseAvg)+';':''}">${fmt(n.noiseAvg,0,'')} / ${fmt(n.noiseMax,0,' dB')}</span></div>
-      <div class="metric-row"><span class="metric-label">» CO2 > 1000</span><span class="metric-value" style="color:${co2AboveColor};">${Math.floor(n.co2Above1000/60)}h${Math.round(n.co2Above1000%60).toString().padStart(2,'0')}</span></div>
+      <div class="metric-row"><span class="metric-label">» CO<sub>2</sub> > 1000 ppm</span><span class="metric-value" style="color:${co2AboveColor};">${Math.floor(n.co2Above1000/60)}h${Math.round(n.co2Above1000%60).toString().padStart(2,'0')}</span></div>
     `;
     document.getElementById('nightDots').innerHTML=nights.map((nn,i)=>
       `<span data-i="${i}" style="width:${i===idx?10:7}px;height:${i===idx?10:7}px;border-radius:50%;background:${nightScoreColor(nn.score)};cursor:pointer;display:inline-block;${i===idx?'outline:1px solid #E8ECEE;outline-offset:2px;':''}"></span>`
@@ -2119,7 +2121,7 @@ function buildSolarGainSection(){
   main.insertAdjacentHTML('beforeend',`
     <div class="cal-section">
       <h2>Apports solaires probables</h2>
-      <p class="hint">Détecté quand la température d'une pièce monte sans que l'extérieur, le CO2 ou l'humidité ne bougent significativement — signe d'un réchauffement par le soleil plutôt que par l'activité ou le chauffage.</p>
+      <p class="hint">Détecté quand la température d'une pièce monte sans que l'extérieur, le CO<sub>2</sub> ou l'humidité ne bougent significativement — signe d'un réchauffement par le soleil plutôt que par l'activité ou le chauffage.</p>
       <div style="max-width:480px;">${rowsHtml}</div>
     </div>
   `);
@@ -2135,8 +2137,8 @@ const RECORD_METRICS=[
   {module:'Séjour',metric:'Pressure',label:'Pression min',agg:'min',unit:' hPa'},
   {module:'Chambre',metric:'Noise',label:'Bruit max (Chambre)',agg:'max',unit:' dB'},
   {module:'Séjour',metric:'Noise',label:'Bruit max (Séjour)',agg:'max',unit:' dB'},
-  {module:'Séjour',metric:'CO2',label:'CO2 max (Séjour)',agg:'max',unit:' ppm'},
-  {module:'Chambre',metric:'CO2',label:'CO2 max (Chambre)',agg:'max',unit:' ppm'},
+  {module:'Séjour',metric:'CO2',label:'CO<sub>2</sub> max (Séjour)',agg:'max',unit:' ppm'},
+  {module:'Chambre',metric:'CO2',label:'CO<sub>2</sub> max (Chambre)',agg:'max',unit:' ppm'},
   {module:'Extérieur',metric:'Humidity',label:'Humidité ext. max',agg:'max',unit:'%'},
   {module:'Extérieur',metric:'Humidity',label:'Humidité ext. min',agg:'min',unit:'%'}
 ];
@@ -2291,7 +2293,7 @@ function buildDashboard(rows){
     <div class="chartbox" style="height:320px;">${chartWrap('tempCompareChart','°C')}</div>
     <h2>Humidité</h2>
     <div class="chartbox">${chartWrap('humChart','%')}</div>
-    <h2>CO2</h2>
+    <h2>CO<sub>2</sub></h2>
     <div class="chartbox">${chartWrap('co2Chart','ppm')}</div>
     <h2>Pression</h2>
     <div class="legend"><span><span class="dot" style="background:#8B98A0"></span>Stable</span><span><span class="dot" style="background:#E8A33D"></span>Évolution modérée</span><span><span class="dot" style="background:#D64545"></span>Chute rapide</span><span><span class="dot" style="background:#3E7CD6"></span>Remontée rapide</span></div>
