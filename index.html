@@ -203,9 +203,8 @@ function timeAxisForRange(rangeDays){
     base.time.displayFormats.hour='HH:mm';
     base.ticks.autoSkip=false;
   }else if(rangeDays===7){
-    base.time.unit='hour'; base.time.stepSize=6;
-    base.time.displayFormats.hour='HH:mm';
-    base.ticks.autoSkip=false;
+    base.time.unit='day'; base.time.stepSize=1;
+    base.time.displayFormats.day='dd/MM';
   }else if(rangeDays<=90){
     base.time.unit='day'; base.time.stepSize=rangeDays===30?2:7;
     base.time.displayFormats.day='dd/MM';
