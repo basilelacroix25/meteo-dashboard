@@ -202,11 +202,9 @@ function timeAxisForRange(rangeDays){
   if(rangeDays===1){
     base.time.unit='hour'; base.time.stepSize=3;
     base.time.displayFormats.hour='HH:mm';
-    base.ticks.autoSkip=false;
   }else if(rangeDays===7){
     base.time.unit='hour'; base.time.stepSize=6;
     base.time.displayFormats.hour='HH:mm';
-    base.ticks.autoSkip=false;
   }else if(rangeDays<=90){
     base.time.unit='day'; base.time.stepSize=rangeDays===30?2:7;
     base.time.displayFormats.day='dd/MM';
@@ -214,6 +212,21 @@ function timeAxisForRange(rangeDays){
     base.time.unit='month'; base.time.stepSize=1;
     base.time.displayFormats.month='MM/yyyy';
   }
+  base.afterBuildTicks=(scale)=>{
+    const spanDays=(scale.max-scale.min)/86400000;
+    if(spanDays>60)return;
+    const existing=new Set(scale.ticks.map(t=>new Date(t.value).setHours(0,0,0,0)));
+    let d=new Date(scale.min); d.setHours(0,0,0,0);
+    if(d.getTime()<scale.min) d=new Date(d.getTime()+86400000);
+    const toAdd=[];
+    let guard=0;
+    while(d.getTime()<=scale.max&&guard<62){
+      if(!existing.has(d.getTime()))toAdd.push({value:d.getTime()});
+      d=new Date(d.getTime()+86400000);
+      guard++;
+    }
+    if(toAdd.length)scale.ticks=scale.ticks.concat(toAdd).sort((a,b)=>a.value-b.value);
+  };
   return base;
 }
 function tooltipTitle24(items){
@@ -565,7 +578,7 @@ function compassGlowSVG(counts,n,size,arrowAngle,speedKmh){
   }).join('');
   let arrow='';
   if(arrowAngle!==undefined&&arrowAngle!==null){
-    const goingTo=(arrowAngle+180)%360;
+    const goingTo=arrowAngle%360;
     arrow=windBarbSVG(cx,cy,goingTo,rInner*1.35,speedKmh||0);
   }
   return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${ring}${glow}${arrow}${dots}</svg>`;
@@ -1745,11 +1758,7 @@ function buildTempCompareChart(rangeDays){
             },
             labelTextColor:(ctx)=>ctx.datasetIndex===4?(ctx.parsed.y>=0?'#D64545':'#3E7CD6'):'#E8ECEE'
           }}},
-      scales:{x:Object.assign(timeAxisForRange(rangeDays),{min:new Date(Date.now()-rangeDays*86400000),max:new Date(),
-                ticks:Object.assign({},timeAxisForRange(rangeDays).ticks,{callback:function(value,index,ticks){
-                  if(index===ticks.length-1)return '';
-                  return this.getLabelForValue(value);
-                }})}),
+      scales:{x:Object.assign(timeAxisForRange(rangeDays),{min:new Date(Date.now()-rangeDays*86400000),max:new Date()}),
               y:{min:yMin,max:yMax,ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}}
     },
     plugins:[gapLabels]
