@@ -166,7 +166,6 @@ const crosshairPlugin={
 };
 if(window.Chart){ Chart.register(crosshairPlugin); }
 
-
 function mix3(a,b,k){return 'rgb('+a.map((v,i)=>Math.round(v+(b[i]-v)*k)).join(',')+')';}
 function gradientColor(t){
   const green=[63,174,86], yellow=[224,178,61], red=[214,69,69];
@@ -202,9 +201,11 @@ function timeAxisForRange(rangeDays){
   if(rangeDays===1){
     base.time.unit='hour'; base.time.stepSize=3;
     base.time.displayFormats.hour='HH:mm';
+    base.ticks.autoSkip=false;
   }else if(rangeDays===7){
     base.time.unit='hour'; base.time.stepSize=6;
     base.time.displayFormats.hour='HH:mm';
+    base.ticks.autoSkip=false;
   }else if(rangeDays<=90){
     base.time.unit='day'; base.time.stepSize=rangeDays===30?2:7;
     base.time.displayFormats.day='dd/MM';
@@ -212,25 +213,6 @@ function timeAxisForRange(rangeDays){
     base.time.unit='month'; base.time.stepSize=1;
     base.time.displayFormats.month='MM/yyyy';
   }
-  base.afterBuildTicks=(scale)=>{
-    const spanDays=(scale.max-scale.min)/86400000;
-    if(spanDays>60)return;
-    const existing=new Set();
-    scale.ticks.forEach(t=>{
-      const dt=new Date(t.value);
-      if(dt.getHours()===0&&dt.getMinutes()===0)existing.add(new Date(dt).setHours(0,0,0,0));
-    });
-    let d=new Date(scale.min); d.setHours(0,0,0,0);
-    if(d.getTime()<scale.min) d=new Date(d.getTime()+86400000);
-    const toAdd=[];
-    let guard=0;
-    while(d.getTime()<=scale.max&&guard<62){
-      if(!existing.has(d.getTime()))toAdd.push({value:d.getTime()});
-      d=new Date(d.getTime()+86400000);
-      guard++;
-    }
-    if(toAdd.length)scale.ticks=scale.ticks.concat(toAdd).sort((a,b)=>a.value-b.value);
-  };
   return base;
 }
 function tooltipTitle24(items){
