@@ -168,18 +168,20 @@ if(window.Chart){ Chart.register(crosshairPlugin); }
 
 if(window.Chart&&Chart.Interaction&&Chart.Interaction.modes){
   Chart.Interaction.modes.xNearest=function(chart,e,options){
-    const items=Chart.Interaction.modes.x(chart,e,options);
     const position=Chart.helpers.getRelativePosition(e,chart);
-    const byDataset=new Map();
-    items.forEach(item=>{
-      const el=item.element;
-      const dist=Math.abs(el.x-position.x);
-      const key=item.datasetIndex;
-      if(!byDataset.has(key)||dist<byDataset.get(key).dist){
-        byDataset.set(key,{item,dist});
-      }
+    const items=[];
+    chart.data.datasets.forEach((ds,datasetIndex)=>{
+      const meta=chart.getDatasetMeta(datasetIndex);
+      if(!meta||meta.hidden||!meta.data||!meta.data.length)return;
+      let bestEl=null,bestIndex=-1,bestDist=Infinity;
+      meta.data.forEach((el,index)=>{
+        if(el.x==null)return;
+        const dist=Math.abs(el.x-position.x);
+        if(dist<bestDist){bestDist=dist;bestEl=el;bestIndex=index;}
+      });
+      if(bestEl)items.push({element:bestEl,datasetIndex,index:bestIndex});
     });
-    return Array.from(byDataset.values()).map(v=>v.item);
+    return items;
   };
 }
 
@@ -334,7 +336,8 @@ function buildRoseSVG(values,n,size,opts){
     const angle=i*step;
     const a0=angle-step/2, a1=angle+step/2;
     const r=Math.max(2,(values[i]/vmax)*maxR);
-    const clickAttr=opts.captionId?` onclick="handleRoseClick(this)" data-dir="${compassLabel(angle)}" data-value="${values[i]}" data-caption="${opts.captionId}" style="cursor:pointer"`:'';
+    const gustAttr=(gustValues&&gustValues[i])?` data-gust="${gustValues[i]}"`:'';
+    const clickAttr=opts.captionId?` onmouseenter="showRoseTip(event,this)" onmousemove="showRoseTip(event,this)" onmouseleave="hideRoseTip()" onclick="showRoseTip(event,this)" data-dir="${compassLabel(angle)}" data-value="${values[i]}" data-suffix="${opts.unit||' km/h'}"${gustAttr} style="cursor:pointer"`:'';
     bars+=`<path d="${wedgePath(cx,cy,0,r,a0,a1)}" fill="rgba(184,192,198,0.55)" stroke="#E8ECEE" stroke-width="0.6"${clickAttr}></path>`;
   }
   let gustDots='';
@@ -381,6 +384,32 @@ function handleRoseClick(el){
   const suffix=el.hasAttribute('data-suffix')?el.getAttribute('data-suffix'):' km/h';
   const cap=capId&&document.getElementById(capId);
   if(cap)cap.innerHTML=`<b>${dir}</b> : <b>${val}${suffix}</b>`;
+}
+function ensureRoseTipEl(){
+  let el=document.getElementById('roseTipFloat');
+  if(!el){
+    el=document.createElement('div');
+    el.id='roseTipFloat';
+    el.style.cssText='position:fixed;z-index:999;background:#0E1418;border:1px solid #262F35;border-radius:6px;padding:6px 9px;font-size:12px;color:#E8ECEE;pointer-events:none;white-space:nowrap;display:none;box-shadow:0 4px 12px rgba(0,0,0,0.4);';
+    document.body.appendChild(el);
+  }
+  return el;
+}
+function showRoseTip(evt,el){
+  const tip=ensureRoseTipEl();
+  const dir=el.getAttribute('data-dir');
+  const val=el.getAttribute('data-value');
+  const suffix=el.getAttribute('data-suffix')||' km/h';
+  const gust=el.getAttribute('data-gust');
+  tip.innerHTML=`<b>${dir}</b><br>Moyenne : <b>${val}${suffix}</b>${gust?`<br>Rafale max : <b>${gust}${suffix}</b>`:''}`;
+  tip.style.display='block';
+  const x=evt.clientX, y=evt.clientY;
+  tip.style.left=Math.min(x+12,window.innerWidth-140)+'px';
+  tip.style.top=Math.max(y-40,4)+'px';
+}
+function hideRoseTip(){
+  const el=document.getElementById('roseTipFloat');
+  if(el)el.style.display='none';
 }
 
 async function fetchJSON(url){
@@ -453,6 +482,7 @@ function detectRecentAeration(room){
       const dtMin=(pts[j].t-pts[i].t)/60000;
       if(dtMin>60)break;
       if(pts[i].v-pts[j].v>=300){
+        if(Date.now()-pts[j].t.getTime()>4*3600000)return null;
         return {from:pts[i].v,to:pts[j].v,durationMin:Math.round(dtMin),t:pts[j].t};
       }
     }
@@ -694,6 +724,7 @@ async function buildDailyMinMaxChart(rows){
   });
   const mins=days.map(k=>Math.min(...byDay[k]));
   const maxs=days.map(k=>Math.max(...byDay[k]));
+  const avgs=days.map(k=>byDay[k].reduce((a,b)=>a+b,0)/byDay[k].length);
 
   const slot=document.getElementById('minmaxSlot');
   slot.innerHTML=`
@@ -706,7 +737,7 @@ async function buildDailyMinMaxChart(rows){
   const minmaxLabels={
     id:'minmaxLabels',
     afterDatasetsDraw(chart){
-      const {ctx,chartArea}=chart;
+      const {ctx,chartArea,scales}=chart;
       const meta=chart.getDatasetMeta(0);
       ctx.save();
       ctx.font='11px JetBrains Mono, monospace';
@@ -716,6 +747,15 @@ async function buildDailyMinMaxChart(rows){
         ctx.fillText(maxs[i].toFixed(1)+'°', bar.x, bar.y-8);
         ctx.fillText(mins[i].toFixed(1)+'°', bar.x, bar.base+16);
         drawWeatherIcon(ctx, weatherCategory(icons[days[i]]), bar.x, chartArea.bottom+42, 20, '#8B98A0');
+        const avgY=scales.y.getPixelForValue(avgs[i]);
+        ctx.beginPath();
+        ctx.arc(bar.x,avgY,3,0,Math.PI*2);
+        ctx.fillStyle='#0E1418';
+        ctx.fill();
+        ctx.lineWidth=1;
+        ctx.strokeStyle='#E8ECEE';
+        ctx.stroke();
+        ctx.fillStyle='#E8ECEE';
       });
       ctx.restore();
     }
@@ -734,7 +774,10 @@ async function buildDailyMinMaxChart(rows){
     options:{
       responsive:true, maintainAspectRatio:false,
       layout:{padding:{top:22,bottom:50}},
-      plugins:{legend:{display:false},tooltip:{callbacks:{label:(ctx)=>ctx.raw.map(v=>v.toFixed(1)+'°C').join(' – ')}}},
+      plugins:{legend:{display:false},tooltip:{callbacks:{
+        label:(ctx)=>ctx.raw.map(v=>v.toFixed(1)+'°C').join(' – '),
+        afterLabel:(ctx)=>'Moyenne : '+avgs[ctx.dataIndex].toFixed(1)+'°C'
+      }}},
       scales:{
         x:{ticks:{color:'#8B98A0',maxRotation:0,minRotation:0,autoSkip:false},grid:{display:false}},
         y:{display:false,min:Math.min(...mins)-1.5,max:Math.max(...maxs)+1.5}
@@ -861,7 +904,7 @@ function buildWindRose7d(rangeDays,periodLabel){
   const values=computeWindBins(anglePts,speedPts,16);
   const gustValues=computeWindBins(anglePts,gustPts,16);
   slot.innerHTML=`
-    <p class="insight-caption" id="roseCaption7d">Rose des vents — moyenne sur ${periodLabel}. Barre blanche = rafale. Touche un secteur pour voir sa valeur.</p>
+    <p class="insight-caption" id="roseCaption7d">Rose des vents — moyenne sur ${periodLabel}. Barre blanche = rafale.</p>
     <div class="rosewrap" style="display:flex;align-items:center;justify-content:center;">${buildRoseSVG(values,16,220,{grid:true,labels:true,captionId:'roseCaption7d',gustValues})}</div>
   `;
 }
@@ -981,7 +1024,7 @@ function buildRiseFallChart(days){
 
   new Chart(document.getElementById('riseFallChart'),{
     type:'line',
-    data:{datasets:[{data:profile.map((v,h)=>({x:h,y:v})),borderColor:'#B8C0C6',
+    data:{datasets:[{data:profile.map((v,h)=>({x:h,y:v})),borderColor:'#B8C0C6',borderWidth:1.5,
       backgroundColor:(context)=>{
         const {ctx,chartArea}=context.chart;
         if(!chartArea)return 'rgba(184,192,198,0.12)';
@@ -1040,19 +1083,36 @@ function buildComfortRadar(rangeDays){
   return new Chart(canvas,{
     type:'radar',
     data:{labels:RADAR_METRICS.map(m=>m.label),datasets:[
-      {label:'Période précédente',data:prevVals,borderColor:'#E8ECEE',borderDash:[5,4],backgroundColor:'transparent',pointRadius:0,borderWidth:1.5},
-      {label:'Période actuelle',data:curVals,borderColor:'#E8ECEE',backgroundColor:'rgba(232,236,238,0.22)',pointRadius:0,borderWidth:2}
+      {label:'Période précédente',data:prevVals,borderColor:'#E8ECEE',borderDash:[5,4],backgroundColor:'transparent',pointRadius:3,pointHoverRadius:5,pointBackgroundColor:'#E8ECEE',borderWidth:1.5},
+      {label:'Période actuelle',data:curVals,borderColor:'#E8ECEE',backgroundColor:'rgba(232,236,238,0.22)',pointRadius:3,pointHoverRadius:5,pointBackgroundColor:'#E8ECEE',borderWidth:2}
     ]},
     options:{
       responsive:true,maintainAspectRatio:false,
       animation:false,
+      interaction:{mode:'index',intersect:false},
       plugins:{
         legend:{display:true,position:'top',labels:{color:'#8B98A0',boxWidth:12,font:{size:11}}},
-        tooltip:{callbacks:{label:(ctx)=>{
-          const m=RADAR_METRICS[ctx.dataIndex];
-          const raw=ctx.datasetIndex===1?curRaw[ctx.dataIndex]:prevRaw[ctx.dataIndex];
-          return ctx.dataset.label+': '+(raw!==null?raw.toFixed(m.dec)+m.unit:'—');
-        }}}
+        tooltip:{
+          filter:(item)=>item.datasetIndex===1,
+          callbacks:{
+            title:(items)=>items.length?RADAR_METRICS[items[0].dataIndex].label:'',
+            label:(ctx)=>{
+              const idx=ctx.dataIndex, m=RADAR_METRICS[idx];
+              const cv=curRaw[idx], pv=prevRaw[idx];
+              let txt='Actuel '+(cv!==null?cv.toFixed(m.dec)+m.unit:'—')+' · Préc. '+(pv!==null?pv.toFixed(m.dec)+m.unit:'—');
+              if(cv!==null&&pv!==null){
+                const diff=cv-pv;
+                txt+=' ('+(diff>=0?'+':'')+diff.toFixed(m.dec)+m.unit+')';
+              }
+              return txt;
+            },
+            labelTextColor:(ctx)=>{
+              const idx=ctx.dataIndex, cv=curRaw[idx], pv=prevRaw[idx];
+              if(cv===null||pv===null)return '#E8ECEE';
+              return cv>=pv?'#D64545':'#3E7CD6';
+            }
+          }
+        }
       },
       scales:{r:{min:0,max:100,ticks:{display:false},grid:{color:'#262F35'},angleLines:{color:'#262F35'},pointLabels:{color:'#B8C0C6',font:{size:9}}}}
     }
@@ -1121,7 +1181,8 @@ function buildDayOverlayChart(days){
       borderColor:`rgba(232,236,238,${opacities[k]})`,
       backgroundColor:`rgba(232,236,238,${opacities[k]})`,
       borderWidth:k===0?2.5:1.5,
-      pointRadius:0,tension:0.35,_baseTension:0.35
+      pointRadius:0,tension:0.35,_baseTension:0.35,
+      _opacity:opacities[k]
     });
   }
   if(!datasets.length){
@@ -1146,7 +1207,12 @@ function buildDayOverlayChart(days){
                    const d=Math.floor(totalH/24), h=totalH%24;
                    return d>0?(d+'j '+h+'h'):h+'h';
                  },
-                 label:(ctx)=>(ctx.dataset.label||'')+': '+ctx.parsed.y.toFixed(1)+'°C'
+                 label:(ctx)=>(ctx.dataset.label||'')+': '+ctx.parsed.y.toFixed(1)+'°C',
+                 labelColor:(ctx)=>{
+                   const op=ctx.dataset._opacity!==undefined?ctx.dataset._opacity:1;
+                   const c=mix('1B2329','E8ECEE',op);
+                   return {borderColor:c,backgroundColor:c};
+                 }
                }}},
       scales:{x:{type:'linear',min:0,max:maxHours,
                   ticks:{color:'#8B98A0',stepSize:days===1?4:24,
@@ -1197,7 +1263,7 @@ function buildPressureChart(rangeDays){
   let pts=(byRoomMetric['Séjour|Pressure']||[]).sort((a,b)=>a.t-b.t);
   if(aggregated)pts=aggregateDaily(pts,'avg');
   else pts=pts.filter(p=>p.t>=new Date(Date.now()-60*86400000));
-  const rates=smoothedRates(pts,aggregated?72:3);
+  let rates=smoothedRates(pts,aggregated?72:3);
   const dataset={
     label:'Pression',
     data:pts.map(p=>({x:p.t,y:p.v})),
@@ -1218,7 +1284,19 @@ function buildPressureChart(rangeDays){
       animation:false,
       hover:{animationDuration:0},
       responsiveAnimationDuration:0,
-      plugins:{legend:{display:false},zoom:ZOOM_OPTS,tooltip:{position:'nearest',callbacks:{title:tooltipTitle24,label:(ctx)=>ctx.parsed.y.toFixed(1)+' hPa'}}},
+      plugins:{legend:{display:false},zoom:ZOOM_OPTS,tooltip:{position:'nearest',callbacks:{
+        title:tooltipTitle24,
+        label:(ctx)=>{
+          const rate=rates[ctx.dataIndex];
+          const b=pressureBadge(rate);
+          return ctx.parsed.y.toFixed(1)+' hPa'+(rate!==null&&rate!==undefined?' ('+(rate>0?'+':'')+rate.toFixed(1)+' hPa/h '+b.arrow+')':'');
+        },
+        labelColor:(ctx)=>{
+          const rate=rates[ctx.dataIndex];
+          const c=pressureColor(rate);
+          return {borderColor:c,backgroundColor:c};
+        }
+      }}},
       scales:{x:Object.assign(timeAxisForRange(rangeDays),{min:new Date(Date.now()-rangeDays*86400000),max:new Date()}),
               y:{ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}}
     }
@@ -1230,6 +1308,7 @@ function buildPressureChart(rangeDays){
     let wpts=(byRoomMetric['Séjour|Pressure']||[]).filter(p=>p.t.getTime()>=minMs-pad&&p.t.getTime()<=maxMs+pad).sort((a,b)=>a.t-b.t);
     if(agg)wpts=aggregateDaily(wpts,'avg');
     const wrates=smoothedRates(wpts,agg?72:3);
+    rates=wrates;
     chart.data.datasets=wpts.length?[{
       label:'Pression',data:wpts.map(p=>({x:p.t,y:p.v})),
       borderWidth:2,pointRadius:0,tension:0.42,_baseTension:0.42,
@@ -1266,7 +1345,7 @@ function buildWindChart(rangeDays){
     afterDatasetsDraw(chart){
       if(!anglePts.length)return;
       const {ctx,chartArea,scales}=chart;
-      const N=Math.min(aggregated?70:14,anglePts.length);
+      const N=Math.min(aggregated?90:24,anglePts.length);
       const step=Math.max(1,Math.floor(anglePts.length/N));
       ctx.save();
       for(let i=0;i<anglePts.length;i+=step){
@@ -1571,7 +1650,7 @@ function buildWeeklyProfileHeatmap(rows){
     const ramp=metricRamp[curMetric];
     let hourHeader='<div class="cal-row"><div class="month-label" style="width:30px;"></div><div class="days">';
     for(let h=0;h<24;h++){
-      hourHeader+=`<div style="width:9px;flex-shrink:0;font-size:8px;color:var(--text-muted);text-align:center;">${h%6===0?h:''}</div>`;
+      hourHeader+=`<div style="flex:1;font-size:8px;color:var(--text-muted);text-align:center;">${h%6===0?h:''}</div>`;
     }
     hourHeader+='</div></div>';
     let rowsHtml=hourHeader;
@@ -1587,7 +1666,7 @@ function buildWeeklyProfileHeatmap(rows){
           title=weekdaysFull[wd]+' '+h+'h : '+Math.round(v)+metricUnit[curMetric]+(interpolated?' (estimé)':'');
           if(interpolated)style='opacity:0.55;outline:1px dashed rgba(232,236,238,0.25);outline-offset:-1px;';
         }
-        cellsHtml+=`<div class="cal-day" title="${title}" style="background:${bg};${style}"></div>`;
+        cellsHtml+=`<div class="cal-day" title="${title}" style="background:${bg};flex:1;width:auto;${style}"></div>`;
       }
       rowsHtml+=`<div class="cal-row"><div class="month-label" style="width:30px;">${weekdaysFull[wd]}</div><div class="days">${cellsHtml}</div></div>`;
     });
@@ -1617,7 +1696,9 @@ function buildWeeklyProfileHeatmap(rows){
   render();
 }
 
-function findGapPeaks(combined){
+function findGapPeaks(combined,minDiff,cap){
+  minDiff=minDiff!==undefined?minDiff:1.5;
+  cap=cap!==undefined?cap:40;
   const peaks=[];
   let runStart=0, runSign=null;
   function closeRun(endIdx){
@@ -1627,7 +1708,7 @@ function findGapPeaks(combined){
       const d=combined[i].ext-combined[i].sej;
       if(Math.abs(d)>maxAbs){maxAbs=Math.abs(d);maxIdx=i;}
     }
-    if(maxAbs>=1.5){
+    if(maxAbs>=minDiff){
       const c=combined[maxIdx];
       peaks.push({
         t:c.t, y:c.ext, diff:c.ext-c.sej, sign:runSign,
@@ -1647,7 +1728,7 @@ function findGapPeaks(combined){
   });
   closeRun(combined.length);
   peaks.sort((a,b)=>Math.abs(b.diff)-Math.abs(a.diff));
-  const top=peaks.slice(0,40);
+  const top=peaks.slice(0,cap);
   top.sort((a,b)=>a.t-b.t);
   return top;
 }
@@ -1679,7 +1760,7 @@ function buildTempCompareChart(rangeDays){
   const sejData=combined.map(c=>({x:c.t,y:c.sej}));
   const extData=combined.map(c=>({x:c.t,y:c.ext}));
   const showLabels=rangeDays<=30;
-  const peaks=showLabels?findGapPeaks(combined):[];
+  const peaks=showLabels?findGapPeaks(combined,rangeDays<=7?0.4:1.5,rangeDays<=7?200:40):[];
 
   const viewCutoff=new Date(Date.now()-rangeDays*86400000);
   const visibleVals=combined.filter(c=>c.t>=viewCutoff).flatMap(c=>[c.ext,c.sej]);
@@ -1769,7 +1850,14 @@ function buildTempCompareChart(rangeDays){
               if(ctx.datasetIndex===4)return 'Écart : '+(ctx.parsed.y>=0?'+':'')+ctx.parsed.y.toFixed(1)+'°C';
               return (ctx.datasetIndex===2?'Séjour: ':'Extérieur: ')+ctx.parsed.y.toFixed(1)+'°C';
             },
-            labelTextColor:(ctx)=>ctx.datasetIndex===4?(ctx.parsed.y>=0?'#D64545':'#3E7CD6'):'#E8ECEE'
+            labelTextColor:(ctx)=>ctx.datasetIndex===4?(ctx.parsed.y>=0?'#D64545':'#3E7CD6'):'#E8ECEE',
+            labelColor:(ctx)=>{
+              if(ctx.datasetIndex===4){
+                const c=ctx.parsed.y>=0?'#D64545':'#3E7CD6';
+                return {borderColor:c,backgroundColor:c};
+              }
+              return {borderColor:'transparent',backgroundColor:'transparent'};
+            }
           }}},
       scales:{x:Object.assign(timeAxisForRange(rangeDays),{min:new Date(Date.now()-rangeDays*86400000),max:new Date()}),
               y:{min:yMin,max:yMax,ticks:{color:'#8B98A0'},grid:{color:'#262F35'}}}
@@ -1955,16 +2043,18 @@ function buildNightScores(){
   function render(){
     const n=nights[idx];
     const dateFmt=n.start.toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short'});
+    const scoreColor=nightScoreColor(n.score);
+    const co2AboveColor=gradientColor(Math.max(0,Math.min(1,n.co2Above1000/120)));
     document.getElementById('nightCardBody').innerHTML=`
       <div class="room-title" style="justify-content:space-between;">
         <span>☾ ${dateFmt}</span>
-        <span style="color:${nightScoreColor(n.score)};font-family:'JetBrains Mono',monospace;">${n.score}/100</span>
+        <span style="color:${scoreColor};background:${scoreColor}22;border:1px solid ${scoreColor}55;border-radius:6px;padding:2px 8px;font-family:'JetBrains Mono',monospace;font-weight:600;">${n.score}/100</span>
       </div>
       ${coloredRow('○ Température moyenne',n.tempAvg,'Temperature',1,'°C')}
       ${coloredRow('● Humidité moyenne',n.humAvg,'Humidity',0,'%')}
       <div class="metric-row"><span class="metric-label">▲ CO2 moyen / max</span><span class="metric-value" style="${n.co2Avg!==null?'color:'+pastilleColor('CO2',n.co2Avg)+';':''}">${fmt(n.co2Avg,0,'')} / ${fmt(n.co2Max,0,' ppm')}</span></div>
       <div class="metric-row"><span class="metric-label">≈ Bruit moyen / pic</span><span class="metric-value" style="${n.noiseAvg!==null?'color:'+pastilleColor('Noise',n.noiseAvg)+';':''}">${fmt(n.noiseAvg,0,'')} / ${fmt(n.noiseMax,0,' dB')}</span></div>
-      <div class="metric-row"><span class="metric-label">» CO2 > 1000</span><span class="metric-value">${Math.floor(n.co2Above1000/60)}h${Math.round(n.co2Above1000%60).toString().padStart(2,'0')}</span></div>
+      <div class="metric-row"><span class="metric-label">» CO2 > 1000</span><span class="metric-value" style="color:${co2AboveColor};">${Math.floor(n.co2Above1000/60)}h${Math.round(n.co2Above1000%60).toString().padStart(2,'0')}</span></div>
     `;
     document.getElementById('nightDots').innerHTML=nights.map((nn,i)=>
       `<span data-i="${i}" style="width:${i===idx?10:7}px;height:${i===idx?10:7}px;border-radius:50%;background:${nightScoreColor(nn.score)};cursor:pointer;display:inline-block;${i===idx?'outline:1px solid #E8ECEE;outline-offset:2px;':''}"></span>`
