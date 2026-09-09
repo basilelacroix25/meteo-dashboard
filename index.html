@@ -37,11 +37,11 @@ h2{font-family:'Fraunces',serif;font-weight:500;font-size:1.15rem;margin:2.5rem 
 .trend.up{color:#D64545;}
 .trend.down{color:#3E7CD6;}
 .minmax-italic{font-style:italic;font-size:11px;color:var(--text-muted);margin:-3px 0 4px;text-align:right;}
-.ext-card .wind-block{display:flex;align-items:center;gap:14px;margin-top:8px;border-top:1px solid var(--border);padding-top:10px;}
-.rose-combo{width:96px;height:96px;flex-shrink:0;}
-.wind-text{font-size:12px;color:var(--text-muted);}
-.wind-text .dir{color:var(--text);font-weight:600;font-size:14px;display:block;margin-bottom:4px;}
-.wind-text b{color:var(--text);font-family:'JetBrains Mono',monospace;font-weight:500;white-space:nowrap;}
+.ext-card .wind-block{display:flex;align-items:center;gap:24px;margin-top:8px;border-top:1px solid var(--border);padding-top:14px;}
+.rose-combo{width:140px;height:140px;flex-shrink:0;}
+.wind-text{font-size:14px;color:var(--text-muted);flex:1;}
+.wind-text .dir{color:var(--text);font-weight:600;font-size:18px;display:block;margin-bottom:6px;}
+.wind-text b{color:var(--text);font-family:'JetBrains Mono',monospace;font-weight:500;white-space:nowrap;font-size:14px;}
 .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:1rem;}
 .tabs button{background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 14px;font-size:13px;cursor:pointer;font-family:'Work Sans',sans-serif;}
 .tabs button.active{background:var(--panel-2);border-color:var(--text-muted);}
@@ -631,7 +631,7 @@ function buildExtDailyRose(currentAngle,currentSpeed){
     const idx=Math.round(a/step)%n;
     counts[idx]++;
   });
-  slot.innerHTML=compassGlowSVG(counts,n,96,currentAngle,currentSpeed);
+  slot.innerHTML=compassGlowSVG(counts,n,140,currentAngle,currentSpeed);
 }
 
 const WEATHER_ICON_CACHE={};
@@ -751,7 +751,7 @@ async function buildDailyMinMaxChart(rows){
         drawWeatherIcon(ctx, weatherCategory(icons[days[i]]), bar.x, chartArea.bottom+42, 20, '#8B98A0');
         const avgY=scales.y.getPixelForValue(avgs[i]);
         ctx.beginPath();
-        ctx.arc(bar.x,avgY,7,0,Math.PI*2);
+        ctx.arc(bar.x,avgY,6,0,Math.PI*2);
         ctx.fillStyle='#0E1418';
         ctx.fill();
         ctx.lineWidth=1;
@@ -859,10 +859,11 @@ function buildDivergingRoseSVG(values,n,size,opts){
 
 function buildWindImpactRoses(rangeDays,periodLabel){
   const events=detectWindOnsets(2,rangeDays);
-  const slot=document.getElementById('windRoseSlot');
+  const slot=document.getElementById('impactRosesSlot');
   if(!slot)return;
+  slot.innerHTML='';
   if(!events.length){
-    slot.insertAdjacentHTML('beforeend',`<p class="hint">Aucun coup de vent détecté (montée rapide au-delà de 15 km/h) sur ${periodLabel}.</p>`);
+    slot.innerHTML=`<p class="hint">Aucun coup de vent détecté (montée rapide au-delà de 11 km/h) sur ${periodLabel}.</p>`;
     return;
   }
   const n=16, step=360/n;
@@ -876,25 +877,23 @@ function buildWindImpactRoses(rangeDays,periodLabel){
   });
   const tempVals=tempSums.map((s,i)=>tempCounts[i]?s/tempCounts[i]:null);
   const humVals=humSums.map((s,i)=>humCounts[i]?s/humCounts[i]:null);
-  slot.insertAdjacentHTML('beforeend',`
+  slot.innerHTML=`
     <p class="hint">Ce que le vent amène : écart de température/humidité extérieure, 2h après le début d'un coup de vent (>11 km/h), selon la direction d'où il souffle. Basé sur ${events.length} épisode${events.length>1?'s':''} détecté${events.length>1?'s':''} sur ${periodLabel}${events.length<8?' — échantillon encore faible, à prendre avec prudence':''}. Rouge = ça monte, bleu = ça descend.</p>
-    <div style="display:flex;gap:10px;">
-      <div style="flex:1;min-width:0;">
-        <p class="insight-caption" id="roseCaptionTemp">Vent → Température</p>
-        <div class="rosewrap" style="height:170px;display:flex;align-items:center;justify-content:center;">${buildDivergingRoseSVG(tempVals,16,140,{captionId:'roseCaptionTemp',unit:'°C'})}</div>
-      </div>
-      <div style="flex:1;min-width:0;">
-        <p class="insight-caption" id="roseCaptionHum">Vent → Humidité</p>
-        <div class="rosewrap" style="height:170px;display:flex;align-items:center;justify-content:center;">${buildDivergingRoseSVG(humVals,16,140,{captionId:'roseCaptionHum',unit:'%'})}</div>
-      </div>
+    <div>
+      <p class="insight-caption" id="roseCaptionTemp">Vent → Température</p>
+      <div class="rosewrap" style="height:150px;display:flex;align-items:center;justify-content:center;">${buildDivergingRoseSVG(tempVals,16,130,{captionId:'roseCaptionTemp',unit:'°C'})}</div>
     </div>
-  `);
+    <div>
+      <p class="insight-caption" id="roseCaptionHum">Vent → Humidité</p>
+      <div class="rosewrap" style="height:150px;display:flex;align-items:center;justify-content:center;">${buildDivergingRoseSVG(humVals,16,130,{captionId:'roseCaptionHum',unit:'%'})}</div>
+    </div>
+  `;
 }
 
 function buildWindRose7d(rangeDays,periodLabel){
   const cutoff=new Date(Date.now()-rangeDays*86400000);
   const anglePts=(byRoomMetric['Anémomètre|WindAngle']||[]).filter(p=>p.t>=cutoff);
-  const slot=document.getElementById('windRoseSlot');
+  const slot=document.getElementById('mainRoseSlot');
   if(!slot)return;
   slot.innerHTML='';
   if(!anglePts.length){
@@ -1478,7 +1477,7 @@ function buildCalendarSection(rows){
   const monthKeys=Object.keys(byMonth).sort();
   const monthNames=['jan.','fév.','mar.','avr.','mai','juin','juil.','août','sep.','oct.','nov.','déc.'];
 
-  const main=document.getElementById('mainContent');
+  const main=document.getElementById('calendarSlot');
   main.insertAdjacentHTML('beforeend',`
     <div class="cal-section">
       <h2>Calendrier</h2>
@@ -1622,16 +1621,8 @@ function buildWeeklyProfileHeatmap(rows){
     });
     return grid.map(row=>row.map(arr=>arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:null));
   }
-  const metricScale={};
-  ['CO2','Noise'].forEach(metric=>{
-    const vals=[];
-    rooms.forEach(room=>{
-      computeAvgGrid(room,metric).forEach(row=>row.forEach(v=>{if(v!==null)vals.push(v);}));
-    });
-    if(vals.length)metricScale[metric]={min:Math.min(...vals),max:Math.max(...vals)};
-  });
 
-  const main=document.getElementById('mainContent');
+  const main=document.getElementById('weeklyProfileSlot');
   main.insertAdjacentHTML('beforeend',`
     <div class="cal-section">
       <h2>Profil hebdomadaire type</h2>
@@ -1662,8 +1653,8 @@ function buildWeeklyProfileHeatmap(rows){
       scale.innerHTML='';
       return;
     }
-    const vmin=metricScale[curMetric]?metricScale[curMetric].min:Math.min(...allVals);
-    const vmax=metricScale[curMetric]?metricScale[curMetric].max:Math.max(...allVals);
+    const vmin=Math.min(...allVals);
+    const vmax=Math.max(...allVals);
     const ramp=metricRamp[curMetric];
     let hourHeader='<div class="cal-row"><div class="month-label" style="width:30px;"></div><div class="days">';
     for(let h=0;h<24;h++){
@@ -1973,7 +1964,7 @@ function buildTodayTimeline(){
     }
   }
   events.sort((a,b)=>a.t-b.t);
-  const main=document.getElementById('mainContent');
+  const main=document.getElementById('todayTimelineSlot');
   const html=events.length?events.map(e=>{
     const hh=e.t.getHours().toString().padStart(2,'0')+':'+e.t.getMinutes().toString().padStart(2,'0');
     return `<div class="timeline-row"><span class="timeline-time">${hh} <span style="color:#8B98A0;">${e.icon}</span></span><span class="timeline-text">${e.text}</span></div>`;
@@ -2034,7 +2025,7 @@ function buildNightScores(){
     if(s)nights.push(s);
   }
   nights.reverse();
-  const main=document.getElementById('mainContent');
+  const main=document.getElementById('nightScoreSlot');
   if(!nights.length){
     main.insertAdjacentHTML('beforeend','<div class="cal-section"><h2>Score "Nuit"</h2><div class="empty">Pas assez de données Chambre pour calculer un score de nuit.</div></div>');
     return;
@@ -2177,7 +2168,7 @@ function computeAllTimeTop3(rows,rm){
 function buildRecordsSection(rows){
   const years=[...new Set(rows.map(r=>new Date(r.timestamp_utc).getFullYear()))].sort();
   const allTimeTop3ByMetric=RECORD_METRICS.map(rm=>computeAllTimeTop3(rows,rm));
-  const main=document.getElementById('mainContent');
+  const main=document.getElementById('recordsSlot');
   main.insertAdjacentHTML('beforeend',`
     <div class="cal-section">
       <h2>Records</h2>
@@ -2231,7 +2222,7 @@ function tempZoneColor(bucketCenter){
   return mix3([232,236,238],[214,69,69],t);
 }
 function buildTimeInZoneSection(){
-  const main=document.getElementById('mainContent');
+  const main=document.getElementById('timeInZoneSlot');
   const rooms=['Séjour','Cuisine','Chambre'];
   main.insertAdjacentHTML('beforeend',`
     <div class="cal-section">
@@ -2294,41 +2285,50 @@ function buildDashboard(rows){
 
   const main=document.getElementById('mainContent');
   main.innerHTML=`
-    <h2>Température</h2>
     <div class="tabs" id="rangeTabs">
       <button data-r="day">Jour</button><button data-r="week">Semaine</button>
       <button data-r="month">Mois</button><button data-r="season">Saison</button><button data-r="year">Année</button>
     </div>
     <p class="hint">Molette ou pincement pour zoomer, glisser pour vous déplacer dans le temps.</p>
+    <h2>Température</h2>
     <div class="legend" id="legend"></div>
     <div class="chartbox">${chartWrap('tempChart','°C')}</div>
+    <h2>Humidité</h2>
+    <div class="chartbox">${chartWrap('humChart','%')}</div>
+    <h2>Pression</h2>
+    <div class="legend"><span><span class="dot" style="background:#8B98A0"></span>Stable</span><span><span class="dot" style="background:#E8A33D"></span>Évolution modérée</span><span><span class="dot" style="background:#D64545"></span>Chute rapide</span><span><span class="dot" style="background:#3E7CD6"></span>Remontée rapide</span></div>
+    <div class="chartbox">${chartWrap('pressureChart','hPa')}</div>
+    <h2>CO<sub>2</sub></h2>
+    <div class="chartbox">${chartWrap('co2Chart','ppm')}</div>
+    <h2>Bruit — Séjour &amp; Chambre</h2>
+    <div class="chartbox">${chartWrap('noiseChart','dB')}</div>
+    <h2>Vent</h2>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;">
+      <div id="mainRoseSlot" style="flex:1;min-width:220px;"></div>
+      <div id="impactRosesSlot" style="flex:1;min-width:200px;display:flex;flex-direction:column;gap:10px;"></div>
+    </div>
+    <div class="legend"><span><span class="dot" style="background:#E8ECEE"></span>Moyenne</span><span><span class="dash"></span>Rafale</span><span><span class="dot" style="background:#E8A33D"></span>Fort</span><span><span class="dot" style="background:#D64545"></span>Très fort</span></div>
+    <p class="hint">Les petites flèches indiquent la direction du vent vers laquelle il souffle.</p>
+    <div class="chartbox">${chartWrap('windChart','km/h')}</div>
+    <h2>Confort intérieur</h2>
+    <p class="hint">Moyennes sur la période sélectionnée (trait plein) vs période précédente équivalente (pointillé).</p>
+    <div class="chartbox" style="max-width:420px;height:380px;"><canvas id="comfortRadarChart"></canvas></div>
     <h2>Extérieur vs Séjour</h2>
     <div class="legend"><span><span class="dot" style="background:#E8ECEE"></span>Séjour</span><span><span class="dot" style="background:#D64545"></span>Extérieur plus chaud</span><span><span class="dot" style="background:#3E7CD6"></span>Extérieur plus froid</span></div>
     <p class="hint" id="tempCompareCaption"></p>
     <div class="chartbox" style="height:320px;">${chartWrap('tempCompareChart','°C')}</div>
-    <h2>Humidité</h2>
-    <div class="chartbox">${chartWrap('humChart','%')}</div>
-    <h2>CO<sub>2</sub></h2>
-    <div class="chartbox">${chartWrap('co2Chart','ppm')}</div>
-    <h2>Pression</h2>
-    <div class="legend"><span><span class="dot" style="background:#8B98A0"></span>Stable</span><span><span class="dot" style="background:#E8A33D"></span>Évolution modérée</span><span><span class="dot" style="background:#D64545"></span>Chute rapide</span><span><span class="dot" style="background:#3E7CD6"></span>Remontée rapide</span></div>
-    <div class="chartbox">${chartWrap('pressureChart','hPa')}</div>
-    <h2>Bruit — Séjour &amp; Chambre</h2>
-    <div class="chartbox">${chartWrap('noiseChart','dB')}</div>
-    <h2>Confort intérieur</h2>
-    <p class="hint">Moyennes sur la période sélectionnée (trait plein) vs période précédente équivalente (pointillé).</p>
-    <div class="chartbox" style="max-width:420px;height:380px;"><canvas id="comfortRadarChart"></canvas></div>
-    <h2>Vent</h2>
-    <div id="windRoseSlot"></div>
-    <div class="legend"><span><span class="dot" style="background:#E8ECEE"></span>Moyenne</span><span><span class="dash"></span>Rafale</span><span><span class="dot" style="background:#E8A33D"></span>Fort</span><span><span class="dot" style="background:#D64545"></span>Très fort</span></div>
-    <p class="hint">Les petites flèches indiquent la direction du vent vers laquelle il souffle.</p>
-    <div class="chartbox">${chartWrap('windChart','km/h')}</div>
-    <h2>À quelle heure ça monte / ça descend ?</h2>
-    <p class="insight-caption" id="riseFallCaption"></p>
-    <div class="chartbox small" id="riseFallCanvasWrap"></div>
     <h2>Aujourd'hui vs jours précédents — Extérieur</h2>
     <div class="chartbox" id="dayOverlayCanvasWrap"></div>
     <div id="minmaxSlot"></div>
+    <h2>À quelle heure ça monte / ça descend ?</h2>
+    <p class="insight-caption" id="riseFallCaption"></p>
+    <div class="chartbox small" id="riseFallCanvasWrap"></div>
+    <div id="todayTimelineSlot"></div>
+    <div id="nightScoreSlot"></div>
+    <div id="weeklyProfileSlot"></div>
+    <div id="timeInZoneSlot"></div>
+    <div id="calendarSlot"></div>
+    <div id="recordsSlot"></div>
   `;
 
   const legend=document.getElementById('legend');
