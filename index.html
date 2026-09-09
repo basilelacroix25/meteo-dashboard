@@ -421,10 +421,11 @@ function dewPoint(tempC,rh){
 }
 
 
-function aerationVerdict(co2,hum){
+function aerationVerdict(co2,hum,extHum){
   let level=0;
-  if((co2!==undefined&&co2>1200)||(hum!==undefined&&hum>70))level=2;
-  else if((co2!==undefined&&co2>800)||(hum!==undefined&&hum>60))level=1;
+  const humHelps=extHum===undefined||hum===undefined||extHum<hum;
+  if((co2!==undefined&&co2>1200)||(hum!==undefined&&hum>70&&humHelps))level=2;
+  else if((co2!==undefined&&co2>800)||(hum!==undefined&&hum>60&&humHelps))level=1;
   return level;
 }
 function detectRecentAeration(room){
@@ -442,7 +443,7 @@ function detectRecentAeration(room){
   return null;
 }
 function aerationFooter(room,m,ext){
-  const level=aerationVerdict(m.CO2,m.Humidity);
+  const level=aerationVerdict(m.CO2,m.Humidity,ext.Humidity);
   const label=['Pas nécessaire','Aérer conseillé','Aérer maintenant'][level];
   const style=level>0?`style="color:${gradientColor(level/2)};"`:'';
   const tempDiff=(m.Temperature!==undefined&&ext.Temperature!==undefined)?(m.Temperature-ext.Temperature):null;
@@ -1496,9 +1497,21 @@ function buildWeeklyProfileHeatmap(rows){
   const metricLabel={CO2:'CO2',Noise:'Bruit'};
   const metricUnit={CO2:' ppm',Noise:' dB'};
   const metricRamp={CO2:'3FAE56',Noise:'D64545'};
+  function computeAvgGrid(room,metric){
+    const metricRows=recentRows.filter(r=>r.module===room&&r.metric===metric);
+    const grid=Array.from({length:7},()=>Array.from({length:24},()=>[]));
+    metricRows.forEach(r=>{
+      const d=new Date(r.timestamp_utc);
+      grid[d.getDay()][d.getHours()].push(r.value);
+    });
+    return grid.map(row=>row.map(arr=>arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:null));
+  }
   const metricScale={};
   ['CO2','Noise'].forEach(metric=>{
-    const vals=recentRows.filter(r=>rooms.includes(r.module)&&r.metric===metric).map(r=>r.value);
+    const vals=[];
+    rooms.forEach(room=>{
+      computeAvgGrid(room,metric).forEach(row=>row.forEach(v=>{if(v!==null)vals.push(v);}));
+    });
     if(vals.length)metricScale[metric]={min:Math.min(...vals),max:Math.max(...vals)};
   });
 
@@ -1517,13 +1530,7 @@ function buildWeeklyProfileHeatmap(rows){
   let curRoom=rooms[0], curMetric='CO2';
 
   function render(){
-    const metricRows=recentRows.filter(r=>r.module===curRoom&&r.metric===curMetric);
-    const grid=Array.from({length:7},()=>Array.from({length:24},()=>[]));
-    metricRows.forEach(r=>{
-      const d=new Date(r.timestamp_utc);
-      grid[d.getDay()][d.getHours()].push(r.value);
-    });
-    const avgGrid=grid.map(row=>row.map(arr=>arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:null));
+    const avgGrid=computeAvgGrid(curRoom,curMetric);
     const interpFlags=[];
     const filledGrid=avgGrid.map(row=>{
       const {out,wasNull}=interpolateRowCircular(row);
