@@ -215,7 +215,11 @@ function timeAxisForRange(rangeDays){
   base.afterBuildTicks=(scale)=>{
     const spanDays=(scale.max-scale.min)/86400000;
     if(spanDays>60)return;
-    const existing=new Set(scale.ticks.map(t=>new Date(t.value).setHours(0,0,0,0)));
+    const existing=new Set();
+    scale.ticks.forEach(t=>{
+      const dt=new Date(t.value);
+      if(dt.getHours()===0&&dt.getMinutes()===0)existing.add(new Date(dt).setHours(0,0,0,0));
+    });
     let d=new Date(scale.min); d.setHours(0,0,0,0);
     if(d.getTime()<scale.min) d=new Date(d.getTime()+86400000);
     const toAdd=[];
