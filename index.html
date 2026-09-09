@@ -166,6 +166,23 @@ const crosshairPlugin={
 };
 if(window.Chart){ Chart.register(crosshairPlugin); }
 
+if(window.Chart&&Chart.Interaction&&Chart.Interaction.modes){
+  Chart.Interaction.modes.xNearest=function(chart,e,options){
+    const items=Chart.Interaction.modes.x(chart,e,options);
+    const position=Chart.helpers.getRelativePosition(e,chart);
+    const byDataset=new Map();
+    items.forEach(item=>{
+      const el=item.element;
+      const dist=Math.abs(el.x-position.x);
+      const key=item.datasetIndex;
+      if(!byDataset.has(key)||dist<byDataset.get(key).dist){
+        byDataset.set(key,{item,dist});
+      }
+    });
+    return Array.from(byDataset.values()).map(v=>v.item);
+  };
+}
+
 function mix3(a,b,k){return 'rgb('+a.map((v,i)=>Math.round(v+(b[i]-v)*k)).join(',')+')';}
 function gradientColor(t){
   const green=[63,174,86], yellow=[224,178,61], red=[214,69,69];
@@ -1116,7 +1133,7 @@ function buildDayOverlayChart(days){
     type:'line',
     data:{datasets},
     options:{responsive:true,maintainAspectRatio:false,
-      interaction:{mode:'x',intersect:false},
+      interaction:{mode:'xNearest',intersect:false},
       elements:{point:{hoverRadius:0,radius:0}},
       animation:false,
       hover:{animationDuration:0},
@@ -1196,7 +1213,7 @@ function buildPressureChart(rangeDays){
     data:{datasets:pts.length?[dataset]:[]},
     options:{
       responsive:true,maintainAspectRatio:false,
-      interaction:{mode:'x',intersect:false},
+      interaction:{mode:'xNearest',intersect:false},
       elements:{point:{hoverRadius:0,radius:0}},
       animation:false,
       hover:{animationDuration:0},
@@ -1296,7 +1313,7 @@ function buildWindChart(rangeDays){
     options:{
       responsive:true,maintainAspectRatio:false,
       layout:{padding:{top:20}},
-      interaction:{mode:'x',intersect:false},
+      interaction:{mode:'xNearest',intersect:false},
       elements:{point:{hoverRadius:0,radius:0}},
       animation:false,
       hover:{animationDuration:0},
@@ -1740,7 +1757,7 @@ function buildTempCompareChart(rangeDays){
     options:{
       responsive:true,maintainAspectRatio:false,
       layout:{padding:{top:34}},
-      interaction:{mode:'x',intersect:false},
+      interaction:{mode:'xNearest',intersect:false},
       elements:{point:{hoverRadius:0,radius:0}},
       animation:false,
       hover:{animationDuration:0},
@@ -2246,7 +2263,7 @@ function buildDashboard(rows){
       data:{datasets:seriesFor(metric,rangeDays)},
       options:{
         responsive:true,maintainAspectRatio:false,
-        interaction:{mode:'x',intersect:false},
+        interaction:{mode:'xNearest',intersect:false},
       elements:{point:{hoverRadius:0,radius:0}},
       animation:false,
       hover:{animationDuration:0},
