@@ -1143,17 +1143,72 @@ function buildComfortRadar(rangeDays){
 
 const IDEAL_TEMP=21, IDEAL_HUM=50, MAX_ZOOM_TEMP=6, MAX_ZOOM_HUM=25;
 let crossCharts={};
-function halfDayBuckets(){
+const crossAxisPlugin={
+  id:'crossAxis',
+  afterDraw(chart){
+    const {ctx,chartArea,scales}=chart;
+    const xs=scales.x, ys=scales.y;
+    const zx=xs.getPixelForValue(0), zy=ys.getPixelForValue(0);
+    ctx.save();
+    ctx.strokeStyle='#8B98A0';
+    ctx.fillStyle='#8B98A0';
+    ctx.lineWidth=1;
+    ctx.font='10px JetBrains Mono, monospace';
+
+    // axe horizontal (H%)
+    ctx.beginPath();
+    ctx.moveTo(chartArea.left,zy);
+    ctx.lineTo(chartArea.right,zy);
+    ctx.stroke();
+    // axe vertical (°C)
+    ctx.beginPath();
+    ctx.moveTo(zx,chartArea.top);
+    ctx.lineTo(zx,chartArea.bottom);
+    ctx.stroke();
+
+    // graduations horizontales (4 pas de chaque côté du zéro)
+    const xMax=xs.max;
+    ctx.textAlign='center';
+    for(let f=-1; f<=1; f+=0.5){
+      if(f===0)continue;
+      const val=xMax*f;
+      const px=xs.getPixelForValue(val);
+      ctx.beginPath(); ctx.moveTo(px,zy-4); ctx.lineTo(px,zy+4); ctx.stroke();
+      ctx.fillText(Math.round(val).toString(), px, zy+16);
+    }
+    // graduations verticales
+    const yMax=ys.max;
+    ctx.textAlign='right';
+    for(let f=-1; f<=1; f+=0.5){
+      if(f===0)continue;
+      const val=yMax*f;
+      const py=ys.getPixelForValue(val);
+      ctx.beginPath(); ctx.moveTo(zx-4,py); ctx.lineTo(zx+4,py); ctx.stroke();
+      ctx.fillText(val.toFixed(1), zx-7, py+3);
+    }
+
+    // libellés d'unité en bout d'axe
+    ctx.textAlign='right';
+    ctx.fillText('H%', chartArea.right, zy-6);
+    ctx.textAlign='left';
+    ctx.fillText('°C', zx+6, chartArea.top+10);
+    ctx.restore();
+  }
+};
+
+
+function halfDayBuckets(refDate){
   const buckets=[];
-  const now=new Date();
-  const todayMidnight=new Date(now); todayMidnight.setHours(0,0,0,0);
-  buckets.push({start:todayMidnight,end:now,isToday:true});
+  const ref=refDate?new Date(refDate):new Date();
+  const refMidnight=new Date(ref); refMidnight.setHours(0,0,0,0);
+  const isRealToday=refMidnight.getTime()===new Date(new Date().setHours(0,0,0,0)).getTime();
+  buckets.push({start:refMidnight,end:isRealToday?new Date():new Date(refMidnight.getTime()+86400000),isLatest:true});
   for(let d=1; d<=15; d++){
-    const dayStart=new Date(todayMidnight.getTime()-d*86400000);
+    const dayStart=new Date(refMidnight.getTime()-d*86400000);
     const noon=new Date(dayStart.getTime()+12*3600000);
     const dayEnd=new Date(dayStart.getTime()+86400000);
-    buckets.push({start:noon,end:dayEnd,isToday:false});
-    buckets.push({start:dayStart,end:noon,isToday:false});
+    buckets.push({start:noon,end:dayEnd,isLatest:false});
+    buckets.push({start:dayStart,end:noon,isLatest:false});
   }
   return buckets;
 }
@@ -1162,9 +1217,11 @@ function bucketAverage(room,metric,start,end){
   if(!pts.length)return null;
   return pts.reduce((a,p)=>a+p.v,0)/pts.length;
 }
-function buildComfortCrossCharts(){
+function buildComfortCrossCharts(offsetDays){
+  offsetDays=offsetDays||0;
   const rooms=['Séjour','Cuisine','Chambre'];
-  const buckets=halfDayBuckets();
+  const refDate=new Date(Date.now()-offsetDays*86400000);
+  const buckets=halfDayBuckets(refDate);
   const total=buckets.length;
   rooms.forEach(room=>{
     const canvas=document.getElementById('crossChart_'+room);
@@ -1176,51 +1233,55 @@ function buildComfortCrossCharts(){
       const hum=bucketAverage(room,'Humidity',b.start,b.end);
       const co2=bucketAverage(room,'CO2',b.start,b.end);
       if(temp===null||hum===null)return null;
-      const alpha=Math.max(0,1-(i/(total-1)));
+      const ageFrac=i/(total-1);
+      const alpha=Math.max(0,1-ageFrac);
+      const radius=Math.max(2,8-ageFrac*6);
       const co2Badness=co2!==null?badnessFor('CO2',co2):0.3;
       return {
         x:hum-IDEAL_HUM, y:temp-IDEAL_TEMP,
         color:gradientColorAlpha(co2Badness===null?0.3:co2Badness,alpha),
-        temp,hum,co2,isToday:b.isToday,alpha
+        temp,hum,co2,isLatest:b.isLatest,radius
       };
     }).filter(p=>p!==null);
 
     const maxTempDev=Math.max(0.01,...points.map(p=>Math.abs(p.y)));
     const maxHumDev=Math.max(0.01,...points.map(p=>Math.abs(p.x)));
     const zoom=Math.max(maxTempDev/MAX_ZOOM_TEMP, maxHumDev/MAX_ZOOM_HUM, 1);
-    const yRange=MAX_ZOOM_TEMP*zoom, xRange=MAX_ZOOM_HUM*zoom;
+    const yRange=MAX_ZOOM_TEMP*zoom*1.08, xRange=MAX_ZOOM_HUM*zoom*1.08;
 
-    crossCharts[room]=new Chart(canvas,{
+    const cfg={
       type:'scatter',
       data:{datasets:[{
         data:points.map(p=>({x:p.x,y:p.y})),
         backgroundColor:points.map(p=>p.color),
-        pointRadius:points.map(p=>p.isToday?7:5),
-        pointBorderColor:points.map(p=>p.isToday?'#E8ECEE':'transparent'),
-        pointBorderWidth:points.map(p=>p.isToday?2:0)
+        pointRadius:points.map(p=>p.radius),
+        pointBorderColor:points.map(p=>p.isLatest?'#E8ECEE':'transparent'),
+        pointBorderWidth:points.map(p=>p.isLatest?2:0),
+        clip:false
       }]},
       options:{
         responsive:true,maintainAspectRatio:false,
         animation:false,
+        layout:{padding:20},
         plugins:{legend:{display:false},tooltip:{callbacks:{
           title:()=>'',
           label:(ctx)=>{
             const p=points[ctx.dataIndex];
             return [
-              (p.isToday?"Aujourd'hui (moyenne)":'')+
+              (p.isLatest?"Le plus récent (moyenne) — ":'')+
               p.temp.toFixed(1)+'°C · '+p.hum.toFixed(0)+'%'+
               (p.co2!==null?' · CO2 '+p.co2.toFixed(0)+' ppm':'')
             ];
           }
         }}},
         scales:{
-          x:{min:-xRange,max:xRange,title:{display:true,text:'Humidité (écart au 50%)',color:'#8B98A0'},
-             ticks:{color:'#8B98A0'},grid:{color:(ctx)=>Math.abs(ctx.tick.value)<0.01?'rgba(232,236,238,0.5)':'#262F35'}},
-          y:{min:-yRange,max:yRange,title:{display:true,text:'Température (écart au 21°C)',color:'#8B98A0'},
-             ticks:{color:'#8B98A0'},grid:{color:(ctx)=>Math.abs(ctx.tick.value)<0.01?'rgba(232,236,238,0.5)':'#262F35'}}
+          x:{min:-xRange,max:xRange,display:false},
+          y:{min:-yRange,max:yRange,display:false}
         }
-      }
-    });
+      },
+      plugins:[crossAxisPlugin]
+    };
+    crossCharts[room]=new Chart(canvas,cfg);
   });
 }
 
@@ -2403,20 +2464,30 @@ function buildDashboard(rows){
     <p class="hint">Moyennes sur la période sélectionnée (trait plein) vs période précédente équivalente (pointillé).</p>
     <div class="chartbox" style="max-width:420px;height:380px;"><canvas id="comfortRadarChart"></canvas></div>
     <h2>Stabilité du confort (15 jours)</h2>
-    <p class="hint">Une croix par pièce, centrée sur l'idéal (21°C / 50%). Un point = une demi-journée ; plus c'est centré, plus les conditions sont optimales. Couleur = niveau de CO2 (vert→rouge). Aujourd'hui = point plein cerclé ; plus c'est ancien, plus c'est estompé.</p>
-    <div style="display:flex;gap:14px;flex-wrap:wrap;">
-      <div style="flex:1;min-width:220px;">
-        <p class="insight-caption">Séjour</p>
-        <div class="chartbox" style="height:230px;"><canvas id="crossChart_Séjour"></canvas></div>
+    <p class="hint">Une croix par pièce, centrée sur l'idéal (21°C / 50%). Un point = une demi-journée, de plus en plus petit et estompé avec l'ancienneté. Couleur = niveau de CO2 (vert→rouge).</p>
+    <div style="display:flex;justify-content:center;gap:14px;flex-wrap:wrap;max-width:460px;margin:0 auto;">
+      <div style="width:210px;">
+        <p style="text-align:center;color:var(--text);font-weight:600;font-size:13px;margin-bottom:6px;">Séjour</p>
+        <div style="width:100%;aspect-ratio:1/1;position:relative;"><canvas id="crossChart_Séjour"></canvas></div>
       </div>
-      <div style="flex:1;min-width:220px;">
-        <p class="insight-caption">Cuisine</p>
-        <div class="chartbox" style="height:230px;"><canvas id="crossChart_Cuisine"></canvas></div>
+    </div>
+    <div style="display:flex;justify-content:center;gap:14px;flex-wrap:wrap;">
+      <div style="width:210px;">
+        <p style="text-align:center;color:var(--text);font-weight:600;font-size:13px;margin-bottom:6px;">Cuisine</p>
+        <div style="width:100%;aspect-ratio:1/1;position:relative;"><canvas id="crossChart_Cuisine"></canvas></div>
       </div>
-      <div style="flex:1;min-width:220px;">
-        <p class="insight-caption">Chambre</p>
-        <div class="chartbox" style="height:230px;"><canvas id="crossChart_Chambre"></canvas></div>
+      <div style="width:210px;">
+        <p style="text-align:center;color:var(--text);font-weight:600;font-size:13px;margin-bottom:6px;">Chambre</p>
+        <div style="width:100%;aspect-ratio:1/1;position:relative;"><canvas id="crossChart_Chambre"></canvas></div>
       </div>
+    </div>
+    <div style="margin-top:14px;max-width:460px;">
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted);margin-bottom:4px;">
+        <span>Il y a 1 an</span>
+        <span id="crossSliderLabel" style="color:var(--text);font-family:'JetBrains Mono',monospace;">Aujourd'hui</span>
+        <span>Aujourd'hui</span>
+      </div>
+      <input type="range" id="crossTimeSlider" min="0" max="365" value="0" style="width:100%;" />
     </div>
     <h2>Extérieur vs Séjour</h2>
     <div class="legend"><span><span class="dot" style="background:#E8ECEE"></span>Séjour</span><span><span class="dot" style="background:#D64545"></span>Extérieur plus chaud</span><span><span class="dot" style="background:#3E7CD6"></span>Extérieur plus froid</span></div>
@@ -2527,6 +2598,20 @@ function buildDashboard(rows){
   buildCalendarSection(rows);
   buildRecordsSection(rows);
   buildComfortCrossCharts();
+  const crossSlider=document.getElementById('crossTimeSlider');
+  const crossSliderLabel=document.getElementById('crossSliderLabel');
+  if(crossSlider){
+    crossSlider.addEventListener('input',()=>{
+      const offset=parseInt(crossSlider.value,10);
+      if(offset===0){
+        crossSliderLabel.textContent="Aujourd'hui";
+      }else{
+        const d=new Date(Date.now()-offset*86400000);
+        crossSliderLabel.textContent=d.toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'});
+      }
+      buildComfortCrossCharts(offset);
+    });
+  }
 }
 
 async function init(){
