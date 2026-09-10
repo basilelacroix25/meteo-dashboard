@@ -1210,20 +1210,18 @@ const crossAxisPlugin={
     // axe vertical (°C), flèches aux deux bouts
     doubleArrowLine(zx,chartArea.bottom,zx,chartArea.top);
 
-    // valeurs min/max absolues en bout de ligne, dans le prolongement de l'axe
-    ctx.textAlign='left';
-    ctx.fillText(Math.round(IDEAL_HUM+xs.max)+'% H', chartArea.right-2, zy-8);
-    ctx.textAlign='right';
-    ctx.fillText(Math.round(IDEAL_HUM+xs.min)+'% H', chartArea.left+2, zy-8);
-    ctx.textAlign='left';
-    ctx.fillText((IDEAL_TEMP+ys.max).toFixed(1)+'°C', zx+6, chartArea.top+8);
-    ctx.fillText((IDEAL_TEMP+ys.min).toFixed(1)+'°C', zx+6, chartArea.bottom-2);
+    // valeurs min/max absolues, centrées en bout de chaque axe
+    ctx.textAlign='center';
+    ctx.fillText(Math.round(IDEAL_HUM+xs.max)+'% H', chartArea.right-8, zy-10);
+    ctx.fillText(Math.round(IDEAL_HUM+xs.min)+'% H', chartArea.left+8, zy-10);
+    ctx.fillText((IDEAL_TEMP+ys.max).toFixed(1)+'°C', zx, chartArea.top+16);
+    ctx.fillText((IDEAL_TEMP+ys.min).toFixed(1)+'°C', zx, chartArea.bottom-6);
     ctx.restore();
   }
 };
 
 
-function halfDayBuckets(refDate){
+function dayBuckets(refDate){
   const buckets=[];
   const ref=refDate?new Date(refDate):new Date();
   const refMidnight=new Date(ref); refMidnight.setHours(0,0,0,0);
@@ -1231,10 +1229,8 @@ function halfDayBuckets(refDate){
   buckets.push({start:refMidnight,end:isRealToday?new Date():new Date(refMidnight.getTime()+86400000),isLatest:true});
   for(let d=1; d<=15; d++){
     const dayStart=new Date(refMidnight.getTime()-d*86400000);
-    const noon=new Date(dayStart.getTime()+12*3600000);
     const dayEnd=new Date(dayStart.getTime()+86400000);
-    buckets.push({start:noon,end:dayEnd,isLatest:false});
-    buckets.push({start:dayStart,end:noon,isLatest:false});
+    buckets.push({start:dayStart,end:dayEnd,isLatest:false});
   }
   return buckets;
 }
@@ -1247,7 +1243,7 @@ function buildComfortCrossCharts(offsetDays){
   offsetDays=offsetDays||0;
   const rooms=['Séjour','Cuisine','Chambre'];
   const refDate=new Date(Date.now()-offsetDays*86400000);
-  const buckets=halfDayBuckets(refDate);
+  const buckets=dayBuckets(refDate);
   const total=buckets.length;
   rooms.forEach(room=>{
     const canvas=document.getElementById('crossChart_'+room);
@@ -1265,7 +1261,7 @@ function buildComfortCrossCharts(offsetDays){
       const co2Badness=co2!==null?co2AvgBadness(co2):0.3;
       const dateLabel=b.isLatest
         ? "Aujourd'hui"
-        : b.start.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'})+' '+(b.start.getHours()===0?'AM':'PM');
+        : b.start.toLocaleDateString('fr-FR',{weekday:'short',day:'2-digit',month:'2-digit'});
       const pointColor=(co2!==null&&co2>1100)
         ? 'rgba(155,89,182,'+alpha.toFixed(2)+')'
         : gradientColorAlpha(co2Badness===null?0.3:co2Badness,alpha);
@@ -2499,7 +2495,7 @@ function buildDashboard(rows){
     <p class="hint">Moyennes sur la période sélectionnée (trait plein) vs période précédente équivalente (pointillé).</p>
     <div class="chartbox" style="max-width:420px;height:380px;"><canvas id="comfortRadarChart"></canvas></div>
     <h2>Stabilité du confort (15 jours)</h2>
-    <p class="hint">Une croix par pièce, centrée sur l'idéal (21°C / 50%). Un point = une demi-journée, de plus en plus petit et estompé avec l'ancienneté. Couleur = niveau de CO2 (vert→rouge).</p>
+    <p class="hint">Une croix par pièce, centrée sur l'idéal (21°C / 50%). Un point = un jour, de plus en plus petit et estompé avec l'ancienneté. Couleur = niveau de CO2 (vert→rouge, violet au-delà de 1100 ppm).</p>
     <div style="display:flex;justify-content:center;gap:14px;flex-wrap:wrap;max-width:460px;margin:0 auto;">
       <div style="width:210px;">
         <p style="text-align:center;color:var(--text);font-weight:600;font-size:13px;margin-bottom:6px;">Séjour</p>
