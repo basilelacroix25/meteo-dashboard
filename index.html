@@ -1088,6 +1088,14 @@ function badnessFor(metric,value){
   else if(value>r.idealHi)badness=(value-r.idealHi)/(r.hardHi-r.idealHi||1);
   return Math.max(0,Math.min(1,badness));
 }
+function co2AvgBadness(value){
+  // échelle plus sensible que TOLERANCE.CO2, pensée pour des MOYENNES (demi-journée)
+  // plutôt que des relevés instantanés — une moyenne dépasse rarement 1000ppm.
+  if(value===undefined||value===null)return null;
+  const idealHi=550, hardHi=950;
+  if(value<=idealHi)return 0;
+  return Math.max(0,Math.min(1,(value-idealHi)/(hardHi-idealHi)));
+}
 function buildComfortRadar(rangeDays){
   const now=new Date();
   const curEnd=now, curStart=new Date(now.getTime()-rangeDays*86400000);
@@ -1151,6 +1159,26 @@ const IDEAL_TEMP=21, IDEAL_HUM=50, MAX_ZOOM_TEMP=6, MAX_ZOOM_HUM=25;
 let crossCharts={};
 const crossAxisPlugin={
   id:'crossAxis',
+  beforeDatasetsDraw(chart){
+    const {ctx,scales}=chart;
+    const xs=scales.x, ys=scales.y;
+    // liseret pointillé blanc sur le point "avant-dernier", à la taille exacte du point
+    // (dessiné AVANT les points eux-mêmes, donc toujours derrière le point le plus récent)
+    if(chart._crossPoints){
+      chart._crossPoints.forEach(p=>{
+        if(!p.isPrevious)return;
+        const px=xs.getPixelForValue(p.x), py=ys.getPixelForValue(p.y);
+        ctx.save();
+        ctx.strokeStyle='#E8ECEE';
+        ctx.lineWidth=2;
+        ctx.setLineDash([2,2]);
+        ctx.beginPath();
+        ctx.arc(px,py,p.radius,0,Math.PI*2);
+        ctx.stroke();
+        ctx.restore();
+      });
+    }
+  },
   afterDraw(chart){
     const {ctx,chartArea,scales}=chart;
     const xs=scales.x, ys=scales.y;
@@ -1161,23 +1189,26 @@ const crossAxisPlugin={
     ctx.lineWidth=1;
     ctx.font='10px JetBrains Mono, monospace';
 
-    function arrowLine(x1,y1,x2,y2){
-      ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
-      const ang=Math.atan2(y2-y1,x2-x1);
+    function arrowHead(x,y,ang){
       const s=5;
       ctx.beginPath();
-      ctx.moveTo(x2,y2);
-      ctx.lineTo(x2-s*Math.cos(ang-0.4),y2-s*Math.sin(ang-0.4));
-      ctx.lineTo(x2-s*Math.cos(ang+0.4),y2-s*Math.sin(ang+0.4));
+      ctx.moveTo(x,y);
+      ctx.lineTo(x-s*Math.cos(ang-0.4),y-s*Math.sin(ang-0.4));
+      ctx.lineTo(x-s*Math.cos(ang+0.4),y-s*Math.sin(ang+0.4));
       ctx.closePath();
       ctx.fillStyle='#8B98A0';
       ctx.fill();
     }
+    function doubleArrowLine(x1,y1,x2,y2){
+      ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+      arrowHead(x2,y2,Math.atan2(y2-y1,x2-x1));
+      arrowHead(x1,y1,Math.atan2(y1-y2,x1-x2));
+    }
 
-    // axe horizontal (H%), flèche vers la droite (max)
-    arrowLine(chartArea.left,zy,chartArea.right,zy);
-    // axe vertical (°C), flèche vers le haut (max)
-    arrowLine(zx,chartArea.bottom,zx,chartArea.top);
+    // axe horizontal (H%), flèches aux deux bouts
+    doubleArrowLine(chartArea.left,zy,chartArea.right,zy);
+    // axe vertical (°C), flèches aux deux bouts
+    doubleArrowLine(zx,chartArea.bottom,zx,chartArea.top);
 
     // valeurs min/max absolues en bout de ligne, dans le prolongement de l'axe
     ctx.textAlign='left';
@@ -1187,22 +1218,6 @@ const crossAxisPlugin={
     ctx.textAlign='left';
     ctx.fillText((IDEAL_TEMP+ys.max).toFixed(1)+'°C', zx+6, chartArea.top+8);
     ctx.fillText((IDEAL_TEMP+ys.min).toFixed(1)+'°C', zx+6, chartArea.bottom-2);
-
-    // cercle pointillé blanc autour de l'avant-dernier point (celui juste avant "aujourd'hui")
-    if(chart._crossPoints){
-      chart._crossPoints.forEach(p=>{
-        if(!p.isPrevious)return;
-        const px=xs.getPixelForValue(p.x), py=ys.getPixelForValue(p.y);
-        ctx.save();
-        ctx.strokeStyle='#E8ECEE';
-        ctx.lineWidth=1.5;
-        ctx.setLineDash([3,2]);
-        ctx.beginPath();
-        ctx.arc(px,py,p.radius+4,0,Math.PI*2);
-        ctx.stroke();
-        ctx.restore();
-      });
-    }
     ctx.restore();
   }
 };
@@ -1247,13 +1262,16 @@ function buildComfortCrossCharts(offsetDays){
       const ageFrac=i/(total-1);
       const alpha=Math.max(0,1-ageFrac);
       const radius=Math.max(2,8-ageFrac*6);
-      const co2Badness=co2!==null?badnessFor('CO2',co2):0.3;
+      const co2Badness=co2!==null?co2AvgBadness(co2):0.3;
       const dateLabel=b.isLatest
         ? "Aujourd'hui"
         : b.start.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'})+' '+(b.start.getHours()===0?'AM':'PM');
+      const pointColor=(co2!==null&&co2>950)
+        ? 'rgba(155,89,182,'+alpha.toFixed(2)+')'
+        : gradientColorAlpha(co2Badness===null?0.3:co2Badness,alpha);
       return {
         x:hum-IDEAL_HUM, y:temp-IDEAL_TEMP,
-        color:gradientColorAlpha(co2Badness===null?0.3:co2Badness,alpha),
+        color:pointColor,
         temp,hum,co2,isLatest:b.isLatest,isPrevious:i===1,radius,dateLabel
       };
     }).filter(p=>p!==null);
