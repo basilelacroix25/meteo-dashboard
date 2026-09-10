@@ -186,10 +186,16 @@ if(window.Chart&&Chart.Interaction&&Chart.Interaction.modes){
 }
 
 function mix3(a,b,k){return 'rgb('+a.map((v,i)=>Math.round(v+(b[i]-v)*k)).join(',')+')';}
+function mix3rgba(a,b,k,alpha){const c=a.map((v,i)=>Math.round(v+(b[i]-v)*k));return 'rgba('+c.join(',')+','+alpha.toFixed(2)+')';}
 function gradientColor(t){
   const green=[63,174,86], yellow=[224,178,61], red=[214,69,69];
   if(t<0.5)return mix3(green,yellow,t/0.5);
   return mix3(yellow,red,(t-0.5)/0.5);
+}
+function gradientColorAlpha(t,alpha){
+  const green=[63,174,86], yellow=[224,178,61], red=[214,69,69];
+  if(t<0.5)return mix3rgba(green,yellow,t/0.5,alpha);
+  return mix3rgba(yellow,red,(t-0.5)/0.5,alpha);
 }
 function pastilleColor(metric,value){
   const r=TOLERANCE[metric];
@@ -1132,6 +1138,89 @@ function buildComfortRadar(rangeDays){
       },
       scales:{r:{min:0,max:100,ticks:{display:false},grid:{color:'#262F35'},angleLines:{color:'#262F35'},pointLabels:{color:'#B8C0C6',font:{size:9}}}}
     }
+  });
+}
+
+const IDEAL_TEMP=21, IDEAL_HUM=50, MAX_ZOOM_TEMP=6, MAX_ZOOM_HUM=25;
+let crossCharts={};
+function halfDayBuckets(){
+  const buckets=[];
+  const now=new Date();
+  const todayMidnight=new Date(now); todayMidnight.setHours(0,0,0,0);
+  buckets.push({start:todayMidnight,end:now,isToday:true});
+  for(let d=1; d<=15; d++){
+    const dayStart=new Date(todayMidnight.getTime()-d*86400000);
+    const noon=new Date(dayStart.getTime()+12*3600000);
+    const dayEnd=new Date(dayStart.getTime()+86400000);
+    buckets.push({start:noon,end:dayEnd,isToday:false});
+    buckets.push({start:dayStart,end:noon,isToday:false});
+  }
+  return buckets;
+}
+function bucketAverage(room,metric,start,end){
+  const pts=(byRoomMetric[room+'|'+metric]||[]).filter(p=>p.t>=start&&p.t<end);
+  if(!pts.length)return null;
+  return pts.reduce((a,p)=>a+p.v,0)/pts.length;
+}
+function buildComfortCrossCharts(){
+  const rooms=['Séjour','Cuisine','Chambre'];
+  const buckets=halfDayBuckets();
+  const total=buckets.length;
+  rooms.forEach(room=>{
+    const canvas=document.getElementById('crossChart_'+room);
+    if(!canvas)return;
+    if(crossCharts[room])crossCharts[room].destroy();
+
+    const points=buckets.map((b,i)=>{
+      const temp=bucketAverage(room,'Temperature',b.start,b.end);
+      const hum=bucketAverage(room,'Humidity',b.start,b.end);
+      const co2=bucketAverage(room,'CO2',b.start,b.end);
+      if(temp===null||hum===null)return null;
+      const alpha=Math.max(0,1-(i/(total-1)));
+      const co2Badness=co2!==null?badnessFor('CO2',co2):0.3;
+      return {
+        x:hum-IDEAL_HUM, y:temp-IDEAL_TEMP,
+        color:gradientColorAlpha(co2Badness===null?0.3:co2Badness,alpha),
+        temp,hum,co2,isToday:b.isToday,alpha
+      };
+    }).filter(p=>p!==null);
+
+    const maxTempDev=Math.max(0.01,...points.map(p=>Math.abs(p.y)));
+    const maxHumDev=Math.max(0.01,...points.map(p=>Math.abs(p.x)));
+    const zoom=Math.max(maxTempDev/MAX_ZOOM_TEMP, maxHumDev/MAX_ZOOM_HUM, 1);
+    const yRange=MAX_ZOOM_TEMP*zoom, xRange=MAX_ZOOM_HUM*zoom;
+
+    crossCharts[room]=new Chart(canvas,{
+      type:'scatter',
+      data:{datasets:[{
+        data:points.map(p=>({x:p.x,y:p.y})),
+        backgroundColor:points.map(p=>p.color),
+        pointRadius:points.map(p=>p.isToday?7:5),
+        pointBorderColor:points.map(p=>p.isToday?'#E8ECEE':'transparent'),
+        pointBorderWidth:points.map(p=>p.isToday?2:0)
+      }]},
+      options:{
+        responsive:true,maintainAspectRatio:false,
+        animation:false,
+        plugins:{legend:{display:false},tooltip:{callbacks:{
+          title:()=>'',
+          label:(ctx)=>{
+            const p=points[ctx.dataIndex];
+            return [
+              (p.isToday?"Aujourd'hui (moyenne)":'')+
+              p.temp.toFixed(1)+'°C · '+p.hum.toFixed(0)+'%'+
+              (p.co2!==null?' · CO2 '+p.co2.toFixed(0)+' ppm':'')
+            ];
+          }
+        }}},
+        scales:{
+          x:{min:-xRange,max:xRange,title:{display:true,text:'Humidité (écart au 50%)',color:'#8B98A0'},
+             ticks:{color:'#8B98A0'},grid:{color:(ctx)=>Math.abs(ctx.tick.value)<0.01?'rgba(232,236,238,0.5)':'#262F35'}},
+          y:{min:-yRange,max:yRange,title:{display:true,text:'Température (écart au 21°C)',color:'#8B98A0'},
+             ticks:{color:'#8B98A0'},grid:{color:(ctx)=>Math.abs(ctx.tick.value)<0.01?'rgba(232,236,238,0.5)':'#262F35'}}
+        }
+      }
+    });
   });
 }
 
@@ -2313,6 +2402,22 @@ function buildDashboard(rows){
     <h2>Confort intérieur</h2>
     <p class="hint">Moyennes sur la période sélectionnée (trait plein) vs période précédente équivalente (pointillé).</p>
     <div class="chartbox" style="max-width:420px;height:380px;"><canvas id="comfortRadarChart"></canvas></div>
+    <h2>Stabilité du confort (15 jours)</h2>
+    <p class="hint">Une croix par pièce, centrée sur l'idéal (21°C / 50%). Un point = une demi-journée ; plus c'est centré, plus les conditions sont optimales. Couleur = niveau de CO2 (vert→rouge). Aujourd'hui = point plein cerclé ; plus c'est ancien, plus c'est estompé.</p>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:220px;">
+        <p class="insight-caption">Séjour</p>
+        <div class="chartbox" style="height:230px;"><canvas id="crossChart_Séjour"></canvas></div>
+      </div>
+      <div style="flex:1;min-width:220px;">
+        <p class="insight-caption">Cuisine</p>
+        <div class="chartbox" style="height:230px;"><canvas id="crossChart_Cuisine"></canvas></div>
+      </div>
+      <div style="flex:1;min-width:220px;">
+        <p class="insight-caption">Chambre</p>
+        <div class="chartbox" style="height:230px;"><canvas id="crossChart_Chambre"></canvas></div>
+      </div>
+    </div>
     <h2>Extérieur vs Séjour</h2>
     <div class="legend"><span><span class="dot" style="background:#E8ECEE"></span>Séjour</span><span><span class="dot" style="background:#D64545"></span>Extérieur plus chaud</span><span><span class="dot" style="background:#3E7CD6"></span>Extérieur plus froid</span></div>
     <p class="hint" id="tempCompareCaption"></p>
@@ -2421,6 +2526,7 @@ function buildDashboard(rows){
   buildTimeInZoneSection();
   buildCalendarSection(rows);
   buildRecordsSection(rows);
+  buildComfortCrossCharts();
 }
 
 async function init(){
