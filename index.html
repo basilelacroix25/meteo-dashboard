@@ -64,6 +64,12 @@ h2{font-family:'Fraunces',serif;font-weight:500;font-size:1.15rem;margin:2.5rem 
 .cal-row .month-label{width:74px;font-size:11px;color:var(--text-muted);flex-shrink:0;font-family:'JetBrains Mono',monospace;}
 .cal-row .days{display:flex;gap:2px;flex:1;flex-wrap:nowrap;}
 .cal-day{width:9px;height:16px;border-radius:2px;background:#20272d;flex-shrink:0;}
+.plain-slider{-webkit-appearance:none;appearance:none;background:transparent;cursor:pointer;height:20px;}
+.plain-slider::-webkit-slider-runnable-track{height:2px;background:#262F35;border-radius:2px;}
+.plain-slider::-moz-range-track{height:2px;background:#262F35;border-radius:2px;}
+.plain-slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:14px;height:14px;border-radius:50%;background:#E8ECEE;margin-top:-6px;border:none;}
+.plain-slider::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:#E8ECEE;border:none;}
+.plain-slider::-moz-range-progress{background:transparent;}
 .empty{background:var(--panel);border:1px dashed var(--border);border-radius:10px;padding:2rem;text-align:center;color:var(--text-muted);}
 .scale{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-muted);margin-top:8px;}
 .grad{width:90px;height:8px;border-radius:4px;}
@@ -1155,43 +1161,48 @@ const crossAxisPlugin={
     ctx.lineWidth=1;
     ctx.font='10px JetBrains Mono, monospace';
 
-    // axe horizontal (H%)
-    ctx.beginPath();
-    ctx.moveTo(chartArea.left,zy);
-    ctx.lineTo(chartArea.right,zy);
-    ctx.stroke();
-    // axe vertical (°C)
-    ctx.beginPath();
-    ctx.moveTo(zx,chartArea.top);
-    ctx.lineTo(zx,chartArea.bottom);
-    ctx.stroke();
-
-    // graduations horizontales (4 pas de chaque côté du zéro)
-    const xMax=xs.max;
-    ctx.textAlign='center';
-    for(let f=-1; f<=1; f+=0.5){
-      if(f===0)continue;
-      const val=xMax*f;
-      const px=xs.getPixelForValue(val);
-      ctx.beginPath(); ctx.moveTo(px,zy-4); ctx.lineTo(px,zy+4); ctx.stroke();
-      ctx.fillText(Math.round(val).toString(), px, zy+16);
-    }
-    // graduations verticales
-    const yMax=ys.max;
-    ctx.textAlign='right';
-    for(let f=-1; f<=1; f+=0.5){
-      if(f===0)continue;
-      const val=yMax*f;
-      const py=ys.getPixelForValue(val);
-      ctx.beginPath(); ctx.moveTo(zx-4,py); ctx.lineTo(zx+4,py); ctx.stroke();
-      ctx.fillText(val.toFixed(1), zx-7, py+3);
+    function arrowLine(x1,y1,x2,y2){
+      ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+      const ang=Math.atan2(y2-y1,x2-x1);
+      const s=5;
+      ctx.beginPath();
+      ctx.moveTo(x2,y2);
+      ctx.lineTo(x2-s*Math.cos(ang-0.4),y2-s*Math.sin(ang-0.4));
+      ctx.lineTo(x2-s*Math.cos(ang+0.4),y2-s*Math.sin(ang+0.4));
+      ctx.closePath();
+      ctx.fillStyle='#8B98A0';
+      ctx.fill();
     }
 
-    // libellés d'unité en bout d'axe
-    ctx.textAlign='right';
-    ctx.fillText('H%', chartArea.right, zy-6);
+    // axe horizontal (H%), flèche vers la droite (max)
+    arrowLine(chartArea.left,zy,chartArea.right,zy);
+    // axe vertical (°C), flèche vers le haut (max)
+    arrowLine(zx,chartArea.bottom,zx,chartArea.top);
+
+    // valeurs min/max absolues en bout de ligne, dans le prolongement de l'axe
     ctx.textAlign='left';
-    ctx.fillText('°C', zx+6, chartArea.top+10);
+    ctx.fillText(Math.round(IDEAL_HUM+xs.max)+'% H', chartArea.right-2, zy-8);
+    ctx.textAlign='right';
+    ctx.fillText(Math.round(IDEAL_HUM+xs.min)+'% H', chartArea.left+2, zy-8);
+    ctx.textAlign='left';
+    ctx.fillText((IDEAL_TEMP+ys.max).toFixed(1)+'°C', zx+6, chartArea.top+8);
+    ctx.fillText((IDEAL_TEMP+ys.min).toFixed(1)+'°C', zx+6, chartArea.bottom-2);
+
+    // cercle pointillé blanc autour de l'avant-dernier point (celui juste avant "aujourd'hui")
+    if(chart._crossPoints){
+      chart._crossPoints.forEach(p=>{
+        if(!p.isPrevious)return;
+        const px=xs.getPixelForValue(p.x), py=ys.getPixelForValue(p.y);
+        ctx.save();
+        ctx.strokeStyle='#E8ECEE';
+        ctx.lineWidth=1.5;
+        ctx.setLineDash([3,2]);
+        ctx.beginPath();
+        ctx.arc(px,py,p.radius+4,0,Math.PI*2);
+        ctx.stroke();
+        ctx.restore();
+      });
+    }
     ctx.restore();
   }
 };
@@ -1237,12 +1248,18 @@ function buildComfortCrossCharts(offsetDays){
       const alpha=Math.max(0,1-ageFrac);
       const radius=Math.max(2,8-ageFrac*6);
       const co2Badness=co2!==null?badnessFor('CO2',co2):0.3;
+      const dateLabel=b.isLatest
+        ? "Aujourd'hui"
+        : b.start.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'})+' '+(b.start.getHours()===0?'AM':'PM');
       return {
         x:hum-IDEAL_HUM, y:temp-IDEAL_TEMP,
         color:gradientColorAlpha(co2Badness===null?0.3:co2Badness,alpha),
-        temp,hum,co2,isLatest:b.isLatest,radius
+        temp,hum,co2,isLatest:b.isLatest,isPrevious:i===1,radius,dateLabel
       };
     }).filter(p=>p!==null);
+
+    // le plus récent doit être dessiné en dernier (donc au-dessus) : on inverse l'ordre de tracé.
+    const orderedPoints=points.slice().reverse();
 
     const maxTempDev=Math.max(0.01,...points.map(p=>Math.abs(p.y)));
     const maxHumDev=Math.max(0.01,...points.map(p=>Math.abs(p.x)));
@@ -1252,11 +1269,11 @@ function buildComfortCrossCharts(offsetDays){
     const cfg={
       type:'scatter',
       data:{datasets:[{
-        data:points.map(p=>({x:p.x,y:p.y})),
-        backgroundColor:points.map(p=>p.color),
-        pointRadius:points.map(p=>p.radius),
-        pointBorderColor:points.map(p=>p.isLatest?'#E8ECEE':'transparent'),
-        pointBorderWidth:points.map(p=>p.isLatest?2:0),
+        data:orderedPoints.map(p=>({x:p.x,y:p.y})),
+        backgroundColor:orderedPoints.map(p=>p.color),
+        pointRadius:orderedPoints.map(p=>p.radius),
+        pointBorderColor:orderedPoints.map(p=>p.isLatest?'#E8ECEE':'transparent'),
+        pointBorderWidth:orderedPoints.map(p=>p.isLatest?2:0),
         clip:false
       }]},
       options:{
@@ -1264,11 +1281,11 @@ function buildComfortCrossCharts(offsetDays){
         animation:false,
         layout:{padding:20},
         plugins:{legend:{display:false},tooltip:{callbacks:{
-          title:()=>'',
+          title:(items)=>items.length?orderedPoints[items[0].dataIndex].dateLabel:'',
           label:(ctx)=>{
-            const p=points[ctx.dataIndex];
+            const p=orderedPoints[ctx.dataIndex];
             return [
-              (p.isLatest?"Le plus récent (moyenne) — ":'')+
+              (p.isLatest?"(moyenne) — ":'')+
               p.temp.toFixed(1)+'°C · '+p.hum.toFixed(0)+'%'+
               (p.co2!==null?' · CO2 '+p.co2.toFixed(0)+' ppm':'')
             ];
@@ -1282,6 +1299,7 @@ function buildComfortCrossCharts(offsetDays){
       plugins:[crossAxisPlugin]
     };
     crossCharts[room]=new Chart(canvas,cfg);
+    crossCharts[room]._crossPoints=orderedPoints;
   });
 }
 
@@ -2487,7 +2505,7 @@ function buildDashboard(rows){
         <span id="crossSliderLabel" style="color:var(--text);font-family:'JetBrains Mono',monospace;">Aujourd'hui</span>
         <span>Aujourd'hui</span>
       </div>
-      <input type="range" id="crossTimeSlider" min="0" max="365" value="0" style="width:100%;" />
+      <input type="range" id="crossTimeSlider" class="plain-slider" min="0" max="365" value="365" style="width:100%;" />
     </div>
     <h2>Extérieur vs Séjour</h2>
     <div class="legend"><span><span class="dot" style="background:#E8ECEE"></span>Séjour</span><span><span class="dot" style="background:#D64545"></span>Extérieur plus chaud</span><span><span class="dot" style="background:#3E7CD6"></span>Extérieur plus froid</span></div>
@@ -2602,7 +2620,7 @@ function buildDashboard(rows){
   const crossSliderLabel=document.getElementById('crossSliderLabel');
   if(crossSlider){
     crossSlider.addEventListener('input',()=>{
-      const offset=parseInt(crossSlider.value,10);
+      const offset=365-parseInt(crossSlider.value,10);
       if(offset===0){
         crossSliderLabel.textContent="Aujourd'hui";
       }else{
