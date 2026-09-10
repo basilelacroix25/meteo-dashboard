@@ -1164,8 +1164,8 @@ const crossAxisPlugin={
     const xs=scales.x, ys=scales.y;
     // liseret pointillé blanc sur le point "avant-dernier", à la taille exacte du point
     // (dessiné AVANT les points eux-mêmes, donc toujours derrière le point le plus récent)
-    if(chart._crossPoints){
-      chart._crossPoints.forEach(p=>{
+    if(chart.options.plugins.crossAxis&&chart.options.plugins.crossAxis.points){
+      chart.options.plugins.crossAxis.points.forEach(p=>{
         if(!p.isPrevious)return;
         const px=xs.getPixelForValue(p.x), py=ys.getPixelForValue(p.y);
         ctx.save();
@@ -1266,7 +1266,7 @@ function buildComfortCrossCharts(offsetDays){
       const dateLabel=b.isLatest
         ? "Aujourd'hui"
         : b.start.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'})+' '+(b.start.getHours()===0?'AM':'PM');
-      const pointColor=(co2!==null&&co2>950)
+      const pointColor=(co2!==null&&co2>1100)
         ? 'rgba(155,89,182,'+alpha.toFixed(2)+')'
         : gradientColorAlpha(co2Badness===null?0.3:co2Badness,alpha);
       return {
@@ -1298,7 +1298,7 @@ function buildComfortCrossCharts(offsetDays){
         responsive:true,maintainAspectRatio:false,
         animation:false,
         layout:{padding:20},
-        plugins:{legend:{display:false},tooltip:{callbacks:{
+        plugins:{legend:{display:false},crossAxis:{points:orderedPoints},tooltip:{callbacks:{
           title:(items)=>items.length?orderedPoints[items[0].dataIndex].dateLabel:'',
           label:(ctx)=>{
             const p=orderedPoints[ctx.dataIndex];
@@ -1317,7 +1317,6 @@ function buildComfortCrossCharts(offsetDays){
       plugins:[crossAxisPlugin]
     };
     crossCharts[room]=new Chart(canvas,cfg);
-    crossCharts[room]._crossPoints=orderedPoints;
   });
 }
 
