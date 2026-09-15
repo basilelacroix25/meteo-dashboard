@@ -789,6 +789,16 @@ async function buildDailyMinMaxChart(rows){
     }
   };
 
+  function visibleDayRangeY(chart){
+    const xs=chart.scales.x;
+    const visibleDays=allDays.filter(k=>{
+      const t=new Date(k+'T12:00:00Z').getTime();
+      return t>=xs.min&&t<=xs.max;
+    });
+    if(!visibleDays.length)return null;
+    return {min:Math.min(...visibleDays.map(k=>mins[k]))-1.5, max:Math.max(...visibleDays.map(k=>maxs[k]))+1.5};
+  }
+
   async function ensureIconsForVisibleRange(chart){
     const xs=chart.scales.x;
     if(!xs)return;
@@ -803,12 +813,17 @@ async function buildDailyMinMaxChart(rows){
     chart.update('none');
   }
 
-  // zoom/pan indépendants de ce graphe (pas de synchronisation avec les courbes du haut,
-  // ce graphe a sa propre échelle de temps par jour).
+  // uniquement du défilement (pas de zoom molette/pincement) : ce graphe permet de
+  // remonter dans l'historique, pas d'en resserrer l'échelle.
   const localZoomOpts={
-    pan:{enabled:true,mode:'x',threshold:10,onPanComplete:({chart})=>ensureIconsForVisibleRange(chart)},
-    zoom:{wheel:{enabled:true},pinch:{enabled:true},mode:'x',onZoomComplete:({chart})=>ensureIconsForVisibleRange(chart)}
+    pan:{enabled:true,mode:'x',threshold:10,onPanComplete:({chart})=>{
+      const yr=visibleDayRangeY(chart);
+      if(yr){ chart.options.scales.y.min=yr.min; chart.options.scales.y.max=yr.max; chart.update('none'); }
+      ensureIconsForVisibleRange(chart);
+    }}
   };
+
+  const initYRange={min:Math.min(...last7.map(k=>mins[k]))-1.5, max:Math.max(...last7.map(k=>maxs[k]))+1.5};
 
   new Chart(document.getElementById('minmaxChart'),{
     type:'bar',
@@ -836,7 +851,7 @@ async function buildDailyMinMaxChart(rows){
       scales:{
         x:{type:'time',time:{unit:'day',displayFormats:{day:'dd/MM'}},min:initMin,max:initMax,
            ticks:{color:'#8B98A0',maxRotation:0,minRotation:0,autoSkip:true},grid:{display:false}},
-        y:{display:false,min:Math.min(...allDays.map(k=>mins[k]))-1.5,max:Math.max(...allDays.map(k=>maxs[k]))+1.5}
+        y:{display:false,min:initYRange.min,max:initYRange.max}
       }
     },
     plugins:[minmaxLabels]
@@ -2392,6 +2407,13 @@ function computeHottestNight(rows,module,year){
   // Regroupe les relevés de température en nuits (23h -> 7h le lendemain).
   // La "nuit la plus chaude" = celle dont le minimum atteint est le plus élevé
   // (convention météo des "nuits tropicales" : ce n'est jamais redescendu bien bas).
+  const nights=hottestNightsList(rows,module,year);
+  let best=null;
+  nights.forEach(n=>{ if(!best||n.min>best.min)best=n; });
+  if(!best)return null;
+  return {value:best.min,date:best.start,ts:best.minTs};
+}
+function hottestNightsList(rows,module,year){
   const pts=rows.filter(r=>r.module===module&&r.metric==='Temperature');
   const nights={};
   pts.forEach(r=>{
@@ -2400,20 +2422,22 @@ function computeHottestNight(rows,module,year){
     let nightStart;
     if(h>=23){ nightStart=new Date(d); nightStart.setHours(23,0,0,0); }
     else if(h<7){ nightStart=new Date(d.getTime()-86400000); nightStart.setHours(23,0,0,0); }
-    else return; // en dehors de la fenêtre nuit (23h-7h)
+    else return;
     if(year!=='all'&&nightStart.getFullYear()!==year)return;
     const key=nightStart.getTime();
     if(!nights[key])nights[key]={min:Infinity,minTs:null,start:nightStart};
     if(r.value<nights[key].min){ nights[key].min=r.value; nights[key].minTs=r.timestamp_utc; }
   });
-  let best=null;
-  Object.values(nights).forEach(n=>{ if(n.minTs&&(!best||n.min>best.min))best=n; });
-  if(!best)return null;
-  return {value:best.min,date:best.start,ts:best.minTs};
+  return Object.values(nights).filter(n=>n.minTs);
+}
+function computeHottestNightAllTimeTop3(rows,module){
+  const nights=hottestNightsList(rows,module,'all');
+  return nights.sort((a,b)=>b.min-a.min).slice(0,3).map(n=>n.minTs);
 }
 function buildRecordsSection(rows){
   const years=[...new Set(rows.map(r=>new Date(r.timestamp_utc).getFullYear()))].sort();
   const allTimeTop3ByMetric=RECORD_METRICS.map(rm=>computeAllTimeTop3(rows,rm));
+  const hottestNightTop3=['Extérieur','Séjour'].map(m=>computeHottestNightAllTimeTop3(rows,m));
   const main=document.getElementById('recordsSlot');
   main.insertAdjacentHTML('beforeend',`
     <div class="cal-section">
@@ -2430,13 +2454,15 @@ function buildRecordsSection(rows){
     const wrap=document.getElementById('recordsRows');
     const medalColors=['#D4AF37','#C0C0C0','#CD7F32'];
     const hottestNightExt=computeHottestNight(rows,'Extérieur',year);
-    const hottestNightCh=computeHottestNight(rows,'Chambre',year);
+    const hottestNightSej=computeHottestNight(rows,'Séjour',year);
     const extraRowsHtml=[
-      hottestNightExt?{label:'Nuit la plus chaude (Extérieur)',value:hottestNightExt.value,date:hottestNightExt.date,unit:'°C'}:null,
-      hottestNightCh?{label:'Nuit la plus chaude (Chambre)',value:hottestNightCh.value,date:hottestNightCh.date,unit:'°C'}:null
+      hottestNightExt?{label:'Nuit la plus chaude (Extérieur)',value:hottestNightExt.value,date:hottestNightExt.date,unit:'°C',ts:hottestNightExt.ts,top3:hottestNightTop3[0]}:null,
+      hottestNightSej?{label:'Nuit la plus chaude (Séjour)',value:hottestNightSej.value,date:hottestNightSej.date,unit:'°C',ts:hottestNightSej.ts,top3:hottestNightTop3[1]}:null
     ].filter(r=>r!==null).map(r=>{
       const dateFmt=r.date.toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'});
-      return `<div class="metric-row"><span class="metric-label">${r.label}</span><span class="metric-value">${r.value.toFixed(1)}${r.unit} <span style="color:var(--text-muted);font-size:10px;">(nuit du ${dateFmt})</span></span></div>`;
+      const rank=r.top3.indexOf(r.ts);
+      const dot=rank>=0?`<span class="pastille" style="background:${medalColors[rank]}"></span>`:'';
+      return `<div class="metric-row"><span class="metric-label">${r.label}</span><span class="metric-value">${r.value.toFixed(1)}${r.unit} <span style="color:var(--text-muted);font-size:10px;">(nuit du ${dateFmt})</span>${dot}</span></div>`;
     }).join('');
     wrap.innerHTML=`<div class="card" style="max-width:480px;">${records.filter(r=>r.value!==null).map((r,i)=>{
       const dateFmt=r.date.toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'});
