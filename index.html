@@ -150,7 +150,9 @@ function syncZoomPan(sourceChart){
 }
 const ZOOM_OPTS={
   pan:{enabled:true,mode:'x',threshold:10,onPanComplete:({chart})=>syncZoomPan(chart)},
-  zoom:{wheel:{enabled:true},pinch:{enabled:true},mode:'x',onZoomComplete:({chart})=>syncZoomPan(chart)}
+  zoom:{wheel:{enabled:true},pinch:{enabled:true},mode:'x',onZoomComplete:({chart})=>syncZoomPan(chart)},
+  // empêche de défiler/zoomer au-delà d'aujourd'hui (pas de futur vide à droite)
+  limits:{x:{max:Date.now()}}
 };
 const crosshairPlugin={
   id:'crosshair',
@@ -757,8 +759,10 @@ async function buildDailyMinMaxChart(rows){
   const dayMs=86400000;
   const lastDate=new Date(allDays[allDays.length-1]+'T12:00:00Z').getTime();
   const initStartIdx=Math.max(0,allDays.length-7);
-  const initMin=new Date(allDays[initStartIdx]+'T12:00:00Z').getTime()-dayMs*0.55;
-  const initMax=lastDate+dayMs*0.42;
+  // 7 jours affichés : chaque jour occupe 1/7 de la largeur, la pilule est centrée
+  // sur midi, donc une demi-case de marge de chaque côté met le dernier jour en butée.
+  const initMin=new Date(allDays[initStartIdx]+'T12:00:00Z').getTime()-dayMs*0.5;
+  const initMax=lastDate+dayMs*0.5;
 
   const minmaxLabels={
     id:'minmaxLabels',
@@ -820,6 +824,11 @@ async function buildDailyMinMaxChart(rows){
       const yr=visibleDayRangeY(chart);
       if(yr){ chart.options.scales.y.min=yr.min; chart.options.scales.y.max=yr.max; chart.update('none'); }
       ensureIconsForVisibleRange(chart);
+    }},
+    // bornes de défilement : du premier jour de données jusqu'à aujourd'hui, pas plus loin
+    limits:{x:{
+      min:new Date(allDays[0]+'T12:00:00Z').getTime()-dayMs*0.5,
+      max:lastDate+dayMs*0.5
     }}
   };
 
@@ -832,8 +841,9 @@ async function buildDailyMinMaxChart(rows){
       backgroundColor:'#F2F4F5',
       borderRadius:{topLeft:999,topRight:999,bottomLeft:999,bottomRight:999},
       borderSkipped:false,
-      barThickness:26,
-      maxBarThickness:32
+      barPercentage:0.72,
+      categoryPercentage:0.9,
+      maxBarThickness:34
     }]},
     options:{
       responsive:true, maintainAspectRatio:false,
