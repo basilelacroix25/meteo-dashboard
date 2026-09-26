@@ -1,34 +1,34 @@
 {
-  "updated_utc": "2026-09-26T09:04:23.892436+00:00",
+  "updated_utc": "2026-09-26T09:21:00.360526+00:00",
   "rooms": {
     "Séjour": {
-      "Temperature": 21.7,
-      "Humidity": 44,
-      "CO2": 512,
-      "Noise": 44,
-      "Pressure": 1022
+      "Temperature": 21.8,
+      "Humidity": 43,
+      "CO2": 486,
+      "Noise": 46,
+      "Pressure": 1021.8
     },
     "Extérieur": {
-      "Temperature": 20.2,
-      "Humidity": 46
+      "Temperature": 20.8,
+      "Humidity": 43
     },
     "Cuisine": {
-      "Temperature": 22,
+      "Temperature": 22.1,
       "Humidity": 42,
-      "CO2": 448
+      "CO2": 440
     },
     "Anémomètre": {
-      "WindStrength": 7,
-      "WindAngle": 270,
-      "GustStrength": 14,
-      "GustAngle": 248
+      "WindStrength": 6,
+      "WindAngle": 316,
+      "GustStrength": 10,
+      "GustAngle": 244
     },
     "Chambre": {
       "Temperature": 21.9,
       "Humidity": 43,
-      "CO2": 419,
-      "Noise": 32,
-      "Pressure": 1020.7,
+      "CO2": 402,
+      "Noise": 34,
+      "Pressure": 1020.5,
       "health_idx": 0
     }
   }
