@@ -95675,3 +95675,17 @@ timestamp_utc,module,metric,value
 2026-10-19T00:29:14+00:00,Chambre,Noise,32
 2026-10-19T00:29:14+00:00,Chambre,Pressure,1021.9
 2026-10-19T00:29:14+00:00,Chambre,health_idx,2
+2026-10-19T00:43:25+00:00,Séjour,Temperature,19.7
+2026-10-19T00:43:25+00:00,Séjour,Humidity,65
+2026-10-19T00:43:25+00:00,Séjour,CO2,731
+2026-10-19T00:43:25+00:00,Séjour,Noise,32
+2026-10-19T00:43:25+00:00,Séjour,Pressure,1023.2
+2026-10-19T00:43:05+00:00,Extérieur,Temperature,10.4
+2026-10-19T00:43:05+00:00,Extérieur,Humidity,84
+2026-10-19T00:43:24+00:00,Cuisine,Temperature,20.6
+2026-10-19T00:43:24+00:00,Cuisine,Humidity,63
+2026-10-19T00:43:24+00:00,Cuisine,CO2,668
+2026-10-19T00:43:24+00:00,Anémomètre,WindStrength,1
+2026-10-19T00:43:24+00:00,Anémomètre,WindAngle,338
+2026-10-19T00:43:24+00:00,Anémomètre,GustStrength,3
+2026-10-19T00:43:24+00:00,Anémomètre,GustAngle,342
