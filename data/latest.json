@@ -1,11 +1,11 @@
 {
-  "updated_utc": "2026-10-30T08:37:33.429855+00:00",
+  "updated_utc": "2026-10-30T08:52:39.315518+00:00",
   "rooms": {
     "Chambre": {
       "Temperature": 20.7,
       "Humidity": 54,
-      "CO2": 1511,
-      "Noise": 32,
+      "CO2": 1453,
+      "Noise": 33,
       "Pressure": 1023.4,
       "health_idx": 1
     }
