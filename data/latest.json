@@ -1,5 +1,5 @@
 {
-  "updated_utc": "2026-10-30T00:37:37.610184+00:00",
+  "updated_utc": "2026-10-30T00:52:35.179984+00:00",
   "rooms": {
     "Séjour": {
       "Temperature": 20.7,
@@ -24,11 +24,11 @@
       "GustAngle": 276
     },
     "Chambre": {
-      "Temperature": 20.8,
+      "Temperature": 20.9,
       "Humidity": 53,
-      "CO2": 1153,
-      "Noise": 33,
-      "Pressure": 1022.9,
+      "CO2": 1401,
+      "Noise": 32,
+      "Pressure": 1022.8,
       "health_idx": 1
     }
   }
