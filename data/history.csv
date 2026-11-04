@@ -128401,3 +128401,17 @@ timestamp_utc,module,metric,value
 2026-11-04T22:48:25+00:00,Anémomètre,WindAngle,270
 2026-11-04T22:48:25+00:00,Anémomètre,GustStrength,13
 2026-11-04T22:48:25+00:00,Anémomètre,GustAngle,297
+2026-11-04T22:58:32+00:00,Séjour,Temperature,19.8
+2026-11-04T22:58:32+00:00,Séjour,Humidity,52
+2026-11-04T22:58:32+00:00,Séjour,CO2,735
+2026-11-04T22:58:32+00:00,Séjour,Noise,32
+2026-11-04T22:58:32+00:00,Séjour,Pressure,1019.7
+2026-11-04T22:57:49+00:00,Extérieur,Temperature,6.9
+2026-11-04T22:57:49+00:00,Extérieur,Humidity,73
+2026-11-04T22:58:02+00:00,Cuisine,Temperature,21.4
+2026-11-04T22:58:02+00:00,Cuisine,Humidity,47
+2026-11-04T22:58:02+00:00,Cuisine,CO2,714
+2026-11-04T22:58:27+00:00,Anémomètre,WindStrength,8
+2026-11-04T22:58:27+00:00,Anémomètre,WindAngle,291
+2026-11-04T22:58:27+00:00,Anémomètre,GustStrength,16
+2026-11-04T22:58:27+00:00,Anémomètre,GustAngle,331
