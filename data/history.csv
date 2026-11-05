@@ -128877,3 +128877,9 @@ timestamp_utc,module,metric,value
 2026-11-05T07:59:34+00:00,Anémomètre,WindAngle,259
 2026-11-05T07:59:34+00:00,Anémomètre,GustStrength,38
 2026-11-05T07:59:34+00:00,Anémomètre,GustAngle,317
+2026-11-05T08:22:50+00:00,Chambre,Temperature,19.3
+2026-11-05T08:22:50+00:00,Chambre,Humidity,58
+2026-11-05T08:22:50+00:00,Chambre,CO2,2114
+2026-11-05T08:22:50+00:00,Chambre,Noise,33
+2026-11-05T08:22:50+00:00,Chambre,Pressure,1019.7
+2026-11-05T08:22:50+00:00,Chambre,health_idx,2
