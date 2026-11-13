@@ -1,5 +1,5 @@
 {
-  "updated_utc": "2026-11-13T16:48:31.873631+00:00",
+  "updated_utc": "2026-11-13T16:52:50.911219+00:00",
   "rooms": {
     "Séjour": {
       "Temperature": 20.8,
@@ -27,8 +27,8 @@
       "Temperature": 20.9,
       "Humidity": 48,
       "CO2": 817,
-      "Noise": 34,
-      "Pressure": 1012.7,
+      "Noise": 47,
+      "Pressure": 1012.8,
       "health_idx": 0
     }
   }
